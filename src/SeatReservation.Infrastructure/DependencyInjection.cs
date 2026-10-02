@@ -3,13 +3,15 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using SeatReservation.Application.Abstractions;
+using SeatReservation.Infrastructure.Migrations;
 using SeatReservation.Infrastructure.Persistence;
 
 namespace SeatReservation.Infrastructure;
 
 public static class DependencyInjection
 {
-    /// <summary>Registers the repository layer. Runner, repositories and migrations arrive in T-1.6 onwards.</summary>
+    /// <summary>Registers the repository layer. Transaction runner and repositories arrive in T-1.9 onwards.</summary>
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -25,6 +27,10 @@ public static class DependencyInjection
             ConnectionStringResolver.Resolve(sp.GetRequiredService<IConfiguration>()),
             sp.GetRequiredService<IOptions<DatabaseOptions>>().Value,
             includeErrorDetail: sp.GetRequiredService<IHostEnvironment>().IsDevelopment()));
+
+        services.TryAddSingleton<MigrationState>();
+        services.TryAddSingleton<IReadinessState>(sp => sp.GetRequiredService<MigrationState>());
+        services.AddHostedService<MigrationRunner>();
 
         return services;
     }

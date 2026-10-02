@@ -1,9 +1,13 @@
 using System.Net;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using SeatReservation.Api.Options;
+using SeatReservation.Application;
 using SeatReservation.Application.Options;
+using SeatReservation.Infrastructure;
 using SeatReservation.Infrastructure.Persistence;
 
 namespace SeatReservation.IntegrationTests.Http;
@@ -48,11 +52,22 @@ public class StartupConfigurationTests(WebApplicationFactory<Program> factory) :
     [InlineData("Auth:SigningKey", "too-short", "Auth:SigningKey")]                         // Api
     [InlineData("Admission:PermitLimit", "0", "Admission:PermitLimit")]                     // Api
     [InlineData("Metrics:MaxShowsInGauges", "0", "Metrics:MaxShowsInGauges")]               // Api
-    public void Invalid_configuration_fails_startup_naming_the_key(string key, string value, string expectedInMessage)
+    public async Task Invalid_configuration_fails_startup_naming_the_key(string key, string value, string expectedInMessage)
     {
-        using var broken = factory.WithWebHostBuilder(b => b.UseSetting(key, value));
+        // A plain Host rather than WebApplicationFactory: when startup throws, the factory's deferred host races
+        // with the entry point's disposal and can surface an ObjectDisposedException instead of the real error.
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Postgres"] = "Host=127.0.0.1;Port=1;Database=x;Username=x;Password=x",   // as appsettings.json would supply
+            [key] = value,
+        });
+        builder.Services.AddApplication();
+        builder.Services.AddInfrastructure(builder.Configuration);
+        builder.Services.AddValidatedOptions(builder.Configuration);
+        using var host = builder.Build();
 
-        var ex = Assert.Throws<OptionsValidationException>(() => broken.CreateClient());
+        var ex = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
 
         Assert.Contains(expectedInMessage, ex.Message);
     }

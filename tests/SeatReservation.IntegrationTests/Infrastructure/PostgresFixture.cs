@@ -17,15 +17,23 @@ public sealed class PostgresFixture : IAsyncLifetime
     /// <summary>Creates an empty, uniquely named database on the container and returns a connection string to it.</summary>
     public async Task<string> CreateDatabaseAsync()
     {
-        var name = $"t_{Guid.NewGuid():N}";
-        await using (var admin = new NpgsqlConnection(ConnectionString))
-        {
-            await admin.OpenAsync();
-            await using var create = new NpgsqlCommand($"CREATE DATABASE {name}", admin);
-            await create.ExecuteNonQueryAsync();
-        }
+        var name = NewDatabaseName();
+        await CreateDatabaseNamedAsync(name);
+        return ConnectionStringFor(name);
+    }
 
-        return new NpgsqlConnectionStringBuilder(ConnectionString) { Database = name, Pooling = false }.ConnectionString;
+    public static string NewDatabaseName() => $"t_{Guid.NewGuid():N}";
+
+    /// <summary>Connection string for a database on the container, whether or not it exists yet.</summary>
+    public string ConnectionStringFor(string database) =>
+        new NpgsqlConnectionStringBuilder(ConnectionString) { Database = database, Pooling = false }.ConnectionString;
+
+    public async Task CreateDatabaseNamedAsync(string name)
+    {
+        await using var admin = new NpgsqlConnection(ConnectionString);
+        await admin.OpenAsync();
+        await using var create = new NpgsqlCommand($"CREATE DATABASE {name}", admin);
+        await create.ExecuteNonQueryAsync();
     }
 
     public Task InitializeAsync() => _container.StartAsync();

@@ -39,6 +39,28 @@ public sealed class ReservationService(
         return outcome;
     }
 
+    /// <summary>
+    /// One autocommit read, no locks: the row is either confirmed or cancelled, and both are a consistent answer.
+    /// Only the owner may see it; anyone else gets <see cref="GetReservationOutcome.NotOwner"/>, not a 404 (D-022).
+    /// </summary>
+    public async Task<GetReservationOutcome> GetForOwnerAsync(Guid reservationId, string userId, CancellationToken ct)
+    {
+        if (!readiness.IsReady)
+        {
+            throw new NotReadyException();
+        }
+
+        var reservation = await reservationReads.GetByIdAsync(reservationId, ct);
+        if (reservation is null)
+        {
+            return new GetReservationOutcome.NotFound();
+        }
+
+        return reservation.UserId == userId
+            ? new GetReservationOutcome.Found(reservation)
+            : new GetReservationOutcome.NotOwner();
+    }
+
     private async Task<ReservationOutcome> DecideAsync(ReserveSeatsCommand command, CancellationToken ct)
     {
         if (!readiness.IsReady)

@@ -640,4 +640,86 @@ public class ReservationServiceTests
         var attempt = _logger.Entries.First(e => e.Message.StartsWith("reservation.attempt")).Message;
         Assert.Contains($"idempotency_key_hash={RequestHasherTests.Sha256Prefix(key)}", attempt);
     }
+
+    // ---- owner-only lookup ----
+
+    private Task<GetReservationOutcome> GetAsync(Guid reservationId, string userId) =>
+        Service().GetForOwnerAsync(reservationId, userId, CancellationToken.None);
+
+    [Fact]
+    public async Task Owner_gets_reservation()
+    {
+        GiveAliceSeats("A1", "A2");
+
+        var outcome = await GetAsync(SequentialIdGenerator.IdFor(60), "alice");
+
+        var r = Assert.IsType<GetReservationOutcome.Found>(outcome).Reservation;
+        Assert.Same(_db.ReservationRows[SequentialIdGenerator.IdFor(60)], r);
+        Assert.Equal(1, _reservationReads.GetByIdCalls);
+        Assert.Equal(0, _tx.Invocations);
+    }
+
+    [Fact]
+    public async Task Owner_gets_a_cancelled_reservation_too()
+    {
+        GiveAliceSeats("A1");
+        var id = SequentialIdGenerator.IdFor(60);
+        await _db.Reservations.MarkCancelledAsync(id, _clock.UtcNow, CancellationToken.None);
+
+        var outcome = await GetAsync(id, "alice");
+
+        Assert.Equal(ReservationStatus.Cancelled, Assert.IsType<GetReservationOutcome.Found>(outcome).Reservation.Status);
+    }
+
+    [Fact]
+    public async Task Other_user_gets_NotOwner()
+    {
+        GiveAliceSeats("A1");
+
+        var outcome = await GetAsync(SequentialIdGenerator.IdFor(60), "bob");
+
+        Assert.IsType<GetReservationOutcome.NotOwner>(outcome);
+    }
+
+    [Fact]
+    public async Task Owner_match_is_case_sensitive()
+    {
+        GiveAliceSeats("A1");
+
+        var outcome = await GetAsync(SequentialIdGenerator.IdFor(60), "Alice");
+
+        Assert.IsType<GetReservationOutcome.NotOwner>(outcome);
+    }
+
+    [Fact]
+    public async Task Unknown_gets_NotFound()
+    {
+        var outcome = await GetAsync(Guid.NewGuid(), "alice");
+
+        Assert.IsType<GetReservationOutcome.NotFound>(outcome);
+    }
+
+    [Fact]
+    public async Task Lookup_records_no_metric_and_logs_nothing()
+    {
+        GiveAliceSeats("A1");
+
+        await GetAsync(SequentialIdGenerator.IdFor(60), "alice");
+        await GetAsync(SequentialIdGenerator.IdFor(60), "bob");
+        await GetAsync(Guid.NewGuid(), "alice");
+
+        Assert.Empty(_metrics.ConfirmedSeatCounts);
+        Assert.Empty(_metrics.DeclinedReasons);
+        Assert.Empty(_logger.Entries);
+    }
+
+    [Fact]
+    public async Task Lookup_when_not_ready_throws_NotReadyException_before_any_read()
+    {
+        _readiness.IsReady = false;
+
+        await Assert.ThrowsAsync<NotReadyException>(() => GetAsync(Guid.NewGuid(), "alice"));
+
+        Assert.Equal(0, _reservationReads.GetByIdCalls);
+    }
 }

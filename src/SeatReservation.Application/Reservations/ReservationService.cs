@@ -13,6 +13,7 @@ namespace SeatReservation.Application.Reservations;
 public sealed class ReservationService(
     ShowCatalog catalog,
     ReserveSeatsValidator validator,
+    IReservationReadRepository reservationReads,
     ITransactionRunner tx,
     IIdGenerator ids,
     IClock clock,
@@ -49,11 +50,28 @@ public sealed class ReservationService(
         var sorted = command.Seats.Select(s => s!).Order(StringComparer.Ordinal).ToArray();
         var hash = RequestHasher.Compute(command.ShowId, sorted);
 
-        return await tx.RunAsync("reserve", (uow, c) => ReserveLockedAsync(uow, command, definition.Show, sorted, hash, c), ct);
+        try
+        {
+            return await tx.RunAsync("reserve", (uow, c) => ReserveLockedAsync(uow, command, definition.Show, sorted, hash, c), ct);
+        }
+        catch (DuplicateIdempotencyKeyException)
+        {
+            // Can't happen for two requests of one user (the user lock serializes them), but it's what the unique
+            // constraint reports if it ever does: the other request committed first, so its row is there to read.
+            var prior = await reservationReads.FindByKeyAsync(command.UserId, command.IdempotencyKey, ct)
+                ?? throw new InvariantViolationException("Idempotency key conflict reported, but no reservation has the key.");
+            return ReplayOrConflict(prior, hash);
+        }
     }
 
+    // Same user, same key: the same request is a replay, anything else reuses the key and is a conflict (D-031, D-033).
+    private static ReservationOutcome ReplayOrConflict(Reservation prior, byte[] hash) =>
+        prior.RequestHash.AsSpan().SequenceEqual(hash)
+            ? new ReservationOutcome.Replayed(prior)
+            : new ReservationOutcome.KeyConflict(prior.Id);
+
     // Runs inside the transaction and may be re-run whole on a transient error, so it must not touch anything but the
-    // unit of work. The order of calls is: lock timeout → user lock → count held → lock seats → insert → confirm.
+    // unit of work. The order of calls is: lock timeout → user lock → key lookup → count held → lock seats → insert → confirm.
     private async Task<TxResult<ReservationOutcome>> ReserveLockedAsync(
         IUnitOfWork uow,
         ReserveSeatsCommand command,
@@ -64,6 +82,15 @@ public sealed class ReservationService(
     {
         await uow.SetLockTimeoutAsync(options.Value.LockTimeout, ct);
         await uow.UserLock.AcquireAsync(command.UserId, ct);
+
+        // Under the user lock, so a retry of a request still in flight waits for it and then sees its committed row.
+        // A replay wrote nothing, so rolling back is harmless. Checked before the limit: a replay of a request that
+        // used up the limit must still replay.
+        var prior = await uow.Reservations.FindByKeyAsync(command.UserId, command.IdempotencyKey, ct);
+        if (prior is not null)
+        {
+            return TxResult<ReservationOutcome>.RollbackWith(ReplayOrConflict(prior, hash));
+        }
 
         // Counted under the user lock, so this user's concurrent requests see each other's committed seats and can't
         // jointly exceed the limit (D-035). Counted before the seat locks, so a declined request never waits on them.

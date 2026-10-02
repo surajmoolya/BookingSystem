@@ -42,6 +42,13 @@ public sealed class InMemoryUnitOfWork : IUnitOfWork
     /// <summary>When set, the next <c>Reservations.InsertAsync</c> throws it once (e.g. a lost idempotency race).</summary>
     public Exception? NextInsertFailure { get; set; }
 
+    /// <summary>
+    /// When set, the next <c>Reservations.InsertAsync</c> behaves as if another transaction committed this reservation
+    /// first: the winner (and its seats) lands as committed state that survives our rollback, and the insert throws
+    /// <see cref="DuplicateIdempotencyKeyException"/> the way <c>uq_reservations_user_key</c> would.
+    /// </summary>
+    public Reservation? ConcurrentWinner { get; set; }
+
     /// <summary>When set, <c>Seats.ConfirmAsync</c> reports this row count instead of the real one (simulates lost locks).</summary>
     public int? ConfirmResultOverride { get; set; }
 
@@ -106,7 +113,14 @@ public sealed class InMemoryUnitOfWork : IUnitOfWork
         _seats = new Dictionary<(Guid ShowId, string Label), SeatRow>(seats);
         _reservations = new Dictionary<Guid, Reservation>(reservations);
         _shows = new Dictionary<Guid, ShowInfo>(shows);
+        if (_committedElsewhere is { } winner)
+        {
+            AddConfirmedReservation(winner);
+        }
     }
+
+    // A reservation committed by a simulated concurrent transaction; re-applied on every restore.
+    private Reservation? _committedElsewhere;
 
     // ---- repositories ----
 
@@ -136,6 +150,14 @@ public sealed class InMemoryUnitOfWork : IUnitOfWork
         public Task InsertAsync(Reservation reservation, CancellationToken ct)
         {
             db.Calls.Add("Reservations.Insert");
+            if (db.ConcurrentWinner is { } winner)
+            {
+                db.ConcurrentWinner = null;
+                db._committedElsewhere = winner;
+                db.AddConfirmedReservation(winner);
+                throw new DuplicateIdempotencyKeyException();
+            }
+
             if (db.NextInsertFailure is { } failure)
             {
                 db.NextInsertFailure = null;

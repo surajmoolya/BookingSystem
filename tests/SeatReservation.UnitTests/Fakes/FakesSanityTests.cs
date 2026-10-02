@@ -153,6 +153,25 @@ public class FakesSanityTests
     }
 
     [Fact]
+    public async Task Concurrent_winner_survives_our_rollback_and_the_insert_throws()
+    {
+        var winner = Reservation.Confirmed(SequentialIdGenerator.IdFor(9), ShowId, "alice", "key", new byte[32], ["A2"], 1, DateTimeOffset.UnixEpoch);
+        _uow.ConcurrentWinner = winner;
+
+        await Assert.ThrowsAsync<DuplicateIdempotencyKeyException>(() => _runner.RunAsync<int>("test", async (uow, ct) =>
+        {
+            await uow.Seats.ConfirmAsync(ShowId, ["A1"], "alice", SequentialIdGenerator.IdFor(1), ct);
+            await uow.Reservations.InsertAsync(winner with { Id = SequentialIdGenerator.IdFor(1) }, ct);
+            return TxResult<int>.CommitWith(1);
+        }, CancellationToken.None));
+
+        Assert.Equal([winner.Id], _uow.ReservationRows.Keys);
+        Assert.Equal(SeatStatus.Available, _uow.Seat(ShowId, "A1").Status);   // our write rolled back
+        Assert.Equal(winner.Id, _uow.Seat(ShowId, "A2").ReservationId);         // theirs did not
+        Assert.Null(_uow.ConcurrentWinner);
+    }
+
+    [Fact]
     public async Task Fast_path_read_returns_the_key_reservation_and_seat_owners_in_one_call()
     {
         var reads = new FakeReservationReadRepository(_uow);

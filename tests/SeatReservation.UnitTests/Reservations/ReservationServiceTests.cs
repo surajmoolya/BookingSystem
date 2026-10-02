@@ -15,6 +15,7 @@ public class ReservationServiceTests
     private readonly InMemoryUnitOfWork _db = new();
     private readonly FakeTransactionRunner _tx;
     private readonly FakeShowReadRepository _showReads;
+    private readonly FakeReservationReadRepository _reservationReads;
     private readonly ShowCatalog _catalog;
     private readonly SequentialIdGenerator _ids = new();
     private readonly FakeClock _clock = new();
@@ -24,6 +25,7 @@ public class ReservationServiceTests
     {
         _tx = new FakeTransactionRunner(_db);
         _showReads = new FakeShowReadRepository(_db);
+        _reservationReads = new FakeReservationReadRepository(_db);
         _catalog = new ShowCatalog(_showReads);
         _db.AddShow(new ShowInfo(ShowId, "show", 25_000, 4, 5), ["A1", "A2", "A3", "A10", "B1"]);
     }
@@ -31,6 +33,7 @@ public class ReservationServiceTests
     private ReservationService Service() => new(
         _catalog,
         new ReserveSeatsValidator(MsOptions.Create(new ReservationOptions())),
+        _reservationReads,
         _tx,
         _ids,
         _clock,
@@ -103,6 +106,7 @@ public class ReservationServiceTests
                 "Tx.Begin:reserve",
                 "SetLockTimeout",
                 "UserLock.Acquire:alice",
+                "Reservations.FindByKey",
                 "Seats.CountConfirmedByUser",
                 "Seats.LockForUpdate:A1,A2",
                 "Reservations.Insert",
@@ -292,5 +296,147 @@ public class ReservationServiceTests
 
         var tooBig = await service.ReserveAsync(new ReserveSeatsCommand(showId, "carol", ["A3", "A4", "A1"], "k1"), CancellationToken.None);
         Assert.Equal(new ReservationOutcome.PerUserLimit(2, 0, 3), tooBig);
+    }
+
+    // ---- idempotency ----
+
+    /// <summary>Reserves A1+A2 as alice with key-1 and returns the reservation.</summary>
+    private async Task<Reservation> FirstReservationAsync()
+    {
+        var created = Assert.IsType<ReservationOutcome.Created>(await ReserveAsync(Command("A1", "A2")));
+        _db.Calls.Clear();
+        return created.Reservation;
+    }
+
+    [Fact]
+    public async Task Same_key_and_same_request_returns_Replayed_and_rolls_back()
+    {
+        var original = await FirstReservationAsync();
+
+        var outcome = await ReserveAsync(Command("A1", "A2"));
+
+        Assert.Same(original, Assert.IsType<ReservationOutcome.Replayed>(outcome).Reservation);
+        Assert.False(_tx.LastCommit);
+        Assert.Equal(
+            ["Tx.Begin:reserve", "SetLockTimeout", "UserLock.Acquire:alice", "Reservations.FindByKey", "Tx.Rollback"],
+            _db.Calls);
+        Assert.Single(_db.ReservationRows);
+    }
+
+    [Fact]
+    public async Task Seat_order_permutation_is_a_replay()
+    {
+        var original = await FirstReservationAsync();
+
+        var outcome = await ReserveAsync(Command("A2", "A1"));
+
+        Assert.Equal(original.Id, Assert.IsType<ReservationOutcome.Replayed>(outcome).Reservation.Id);
+    }
+
+    [Fact]
+    public async Task Same_key_with_different_seats_returns_KeyConflict_with_the_original_id()
+    {
+        var original = await FirstReservationAsync();
+
+        var outcome = await ReserveAsync(Command("A3"));
+
+        Assert.Equal(new ReservationOutcome.KeyConflict(original.Id), outcome);
+        Assert.False(_tx.LastCommit);
+        Assert.Equal(SeatStatus.Available, _db.Seat(ShowId, "A3").Status);
+        Assert.Single(_db.ReservationRows);
+    }
+
+    [Fact]
+    public async Task Same_key_on_a_different_show_returns_KeyConflict()
+    {
+        var original = await FirstReservationAsync();
+        var otherShow = SequentialIdGenerator.IdFor(400);
+        _db.AddShow(otherShow, "A1", "A2");
+
+        var outcome = await ReserveAsync(new ReserveSeatsCommand(otherShow, "alice", ["A1", "A2"], "key-1"));
+
+        Assert.Equal(new ReservationOutcome.KeyConflict(original.Id), outcome);
+    }
+
+    [Fact]
+    public async Task The_key_is_scoped_to_the_user()
+    {
+        await FirstReservationAsync();
+
+        var outcome = await ReserveAsync(Command("A3") with { UserId = "bob" });   // bob reuses alice's key string
+
+        Assert.IsType<ReservationOutcome.Created>(outcome);
+    }
+
+    [Fact]
+    public async Task A_replay_is_returned_even_when_the_user_is_at_the_limit()
+    {
+        var full = Assert.IsType<ReservationOutcome.Created>(await ReserveAsync(Command("A1", "A2", "A3", "A10"))).Reservation;
+        _db.Calls.Clear();
+
+        var outcome = await ReserveAsync(Command("A10", "A3", "A2", "A1"));
+
+        Assert.Equal(full.Id, Assert.IsType<ReservationOutcome.Replayed>(outcome).Reservation.Id);
+        Assert.DoesNotContain("Seats.CountConfirmedByUser", _db.Calls);
+    }
+
+    [Fact]
+    public async Task A_replay_is_returned_even_when_the_seats_are_now_its_own()
+    {
+        // The replay's seats are confirmed (by this very reservation); it must not turn into seat_taken.
+        var original = await FirstReservationAsync();
+
+        var outcome = await ReserveAsync(Command("A1", "A2"));
+
+        Assert.Equal(original.Id, Assert.IsType<ReservationOutcome.Replayed>(outcome).Reservation.Id);
+        Assert.DoesNotContain(_db.Calls, c => c.StartsWith("Seats."));
+    }
+
+    [Fact]
+    public async Task A_declined_attempt_does_not_bind_the_key()
+    {
+        _db.SetSeat(ShowId, "A1", SeatStatus.Confirmed, "bob", SequentialIdGenerator.IdFor(80));
+        Assert.IsType<ReservationOutcome.SeatTaken>(await ReserveAsync(Command("A1")));
+
+        var outcome = await ReserveAsync(Command("A2"));   // same key-1, different seats
+
+        Assert.IsType<ReservationOutcome.Created>(outcome);
+    }
+
+    private Reservation Winner(params string[] seats) => Reservation.Confirmed(
+        SequentialIdGenerator.IdFor(90), ShowId, "alice", "key-1", RequestHasher.Compute(ShowId, seats), seats, 25_000 * seats.Length, _clock.UtcNow);
+
+    [Fact]
+    public async Task DuplicateIdempotencyKeyException_rereads_and_replays()
+    {
+        var winner = Winner("A1", "A2");
+        _db.ConcurrentWinner = winner;
+
+        var outcome = await ReserveAsync(Command("A2", "A1"));
+
+        Assert.Equal(winner.Id, Assert.IsType<ReservationOutcome.Replayed>(outcome).Reservation.Id);
+        Assert.Equal(1, _reservationReads.FindByKeyCalls);
+        Assert.False(_tx.LastCommit);
+        Assert.Equal([winner.Id], _db.ReservationRows.Keys);
+    }
+
+    [Fact]
+    public async Task DuplicateIdempotencyKeyException_with_another_request_returns_KeyConflict()
+    {
+        var winner = Winner("A3");
+        _db.ConcurrentWinner = winner;
+
+        var outcome = await ReserveAsync(Command("A1", "A2"));
+
+        Assert.Equal(new ReservationOutcome.KeyConflict(winner.Id), outcome);
+        Assert.Equal(SeatStatus.Available, _db.Seat(ShowId, "A1").Status);
+    }
+
+    [Fact]
+    public async Task DuplicateIdempotencyKeyException_without_a_row_is_an_invariant_violation()
+    {
+        _db.NextInsertFailure = new DuplicateIdempotencyKeyException();
+
+        await Assert.ThrowsAsync<InvariantViolationException>(() => ReserveAsync(Command("A1")));
     }
 }

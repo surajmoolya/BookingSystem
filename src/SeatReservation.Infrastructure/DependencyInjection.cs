@@ -32,6 +32,7 @@ public static class DependencyInjection
 
         services.TryAddSingleton<ITransactionRunner, PgTransactionRunner>();
         services.TryAddSingleton<IShowReadRepository, ShowReadRepository>();
+        services.TryAddSingleton<IReservationReadRepository, ReservationReadRepository>();
 
         services.TryAddSingleton<MigrationState>();
         services.TryAddSingleton<IReadinessState>(sp => sp.GetRequiredService<MigrationState>());

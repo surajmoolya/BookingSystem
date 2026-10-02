@@ -11,6 +11,12 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SeatReservation.Application
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SeatReservation.Infrastructure", "src\SeatReservation.Infrastructure\SeatReservation.Infrastructure.csproj", "{D729BF66-7ACE-4D8A-895F-94A896CE8B09}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{8A7509BC-8D21-4C56-B224-59421CB09C42}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SeatReservation.UnitTests", "tests\SeatReservation.UnitTests\SeatReservation.UnitTests.csproj", "{69989A68-318F-4707-8F6C-AFB34F829B9D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SeatReservation.IntegrationTests", "tests\SeatReservation.IntegrationTests\SeatReservation.IntegrationTests.csproj", "{B1E3E142-0C1D-4C6B-A858-C3943288C140}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -32,10 +38,20 @@ Global
 		{D729BF66-7ACE-4D8A-895F-94A896CE8B09}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D729BF66-7ACE-4D8A-895F-94A896CE8B09}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D729BF66-7ACE-4D8A-895F-94A896CE8B09}.Release|Any CPU.Build.0 = Release|Any CPU
+		{69989A68-318F-4707-8F6C-AFB34F829B9D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{69989A68-318F-4707-8F6C-AFB34F829B9D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{69989A68-318F-4707-8F6C-AFB34F829B9D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{69989A68-318F-4707-8F6C-AFB34F829B9D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B1E3E142-0C1D-4C6B-A858-C3943288C140}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B1E3E142-0C1D-4C6B-A858-C3943288C140}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B1E3E142-0C1D-4C6B-A858-C3943288C140}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B1E3E142-0C1D-4C6B-A858-C3943288C140}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{921E2B60-2C2C-4971-A4DF-29F413B672CD} = {D74CBB06-F9BC-478A-9132-9D8289C11EA1}
 		{C1C08D6C-5C5A-4EDD-8349-A11B62E6BC21} = {D74CBB06-F9BC-478A-9132-9D8289C11EA1}
 		{D729BF66-7ACE-4D8A-895F-94A896CE8B09} = {D74CBB06-F9BC-478A-9132-9D8289C11EA1}
+		{69989A68-318F-4707-8F6C-AFB34F829B9D} = {8A7509BC-8D21-4C56-B224-59421CB09C42}
+		{B1E3E142-0C1D-4C6B-A858-C3943288C140} = {8A7509BC-8D21-4C56-B224-59421CB09C42}
 	EndGlobalSection
 EndGlobal

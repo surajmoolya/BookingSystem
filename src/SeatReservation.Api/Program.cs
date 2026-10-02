@@ -1,4 +1,6 @@
+using SeatReservation.Api.Errors;
 using SeatReservation.Api.Health;
+using SeatReservation.Api.Json;
 using SeatReservation.Api.Options;
 using SeatReservation.Application;
 using SeatReservation.Infrastructure;
@@ -17,13 +19,20 @@ else if (string.IsNullOrWhiteSpace(builder.Configuration["urls"]))
     builder.WebHost.UseUrls("http://0.0.0.0:8080");
 }
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(o => JsonSetup.Configure(o.JsonSerializerOptions))
+    .ConfigureApiBehaviorOptions(o => o.InvalidModelStateResponseFactory = context =>
+        ProblemFactory.ToResult(ProblemFactory.Validation(context.HttpContext, ModelStateErrors.From(context.ModelState))));
+builder.Services.ConfigureHttpJsonOptions(o => JsonSetup.Configure(o.SerializerOptions));
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddProblemDetails();
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddValidatedOptions(builder.Configuration);
 
 var app = builder.Build();
 
+app.UseExceptionHandler();
 app.MapControllers();
 app.MapHealthEndpoints();
 

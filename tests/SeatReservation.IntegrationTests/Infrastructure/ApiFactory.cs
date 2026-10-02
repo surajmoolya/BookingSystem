@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using SeatReservation.Application.Abstractions;
 using SeatReservation.Infrastructure.Migrations;
@@ -11,7 +12,10 @@ namespace SeatReservation.IntegrationTests.Infrastructure;
 /// Use <see cref="StartAsync"/> for a host backed by its own fresh database that is ready to serve; use the constructor with
 /// <see cref="UnreachableConnectionString"/> for tests that must not need a database at all (liveness, configuration).
 /// </summary>
-public sealed class ApiFactory(string connectionString, IReadOnlyDictionary<string, string?>? settings = null)
+public sealed class ApiFactory(
+    string connectionString,
+    IReadOnlyDictionary<string, string?>? settings = null,
+    Action<IServiceCollection>? configureServices = null)
     : WebApplicationFactory<Program>
 {
     /// <summary>Refuses connections immediately; the migration runner keeps retrying in the background.</summary>
@@ -64,6 +68,11 @@ public sealed class ApiFactory(string connectionString, IReadOnlyDictionary<stri
         foreach (var (key, value) in settings ?? new Dictionary<string, string?>())
         {
             builder.UseSetting(key, value);
+        }
+
+        if (configureServices is not null)
+        {
+            builder.ConfigureTestServices(configureServices);
         }
     }
 }

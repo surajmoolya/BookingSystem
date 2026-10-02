@@ -167,7 +167,11 @@ public sealed class ServiceClient : IDisposable
         }
         catch (HttpRequestException ex)
         {
-            var kind = ex.HttpRequestError == HttpRequestError.Unknown ? ex.GetType().Name : ex.HttpRequestError.ToString();
+            // Unknown hides the cause (refused, reset, proxy closed): name the innermost exception instead.
+            var inner = ex.GetBaseException();
+            var kind = ex.HttpRequestError != HttpRequestError.Unknown ? ex.HttpRequestError.ToString()
+                : inner == ex ? ex.GetType().Name
+                : $"{inner.GetType().Name}: {inner.Message}";
             return new Outcome(0, null, null, [], false, Stopwatch.GetElapsedTime(started).TotalMilliseconds, kind, userId);
         }
     }

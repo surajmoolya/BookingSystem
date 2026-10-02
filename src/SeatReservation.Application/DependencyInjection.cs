@@ -1,13 +1,24 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
+using SeatReservation.Application.Options;
 
 namespace SeatReservation.Application;
 
 public static class DependencyInjection
 {
-    /// <summary>Registers the logic-layer services. Populated from T-1.2 onwards.</summary>
+    /// <summary>
+    /// Registers the logic-layer services and the validators for its options. Binding the options to
+    /// configuration (and <c>ValidateOnStart</c>) happens in the composition root, because this layer
+    /// may only reference the logging and options abstractions.
+    /// </summary>
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
+
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<ReservationOptions>, ReservationOptionsValidator>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<ShowOptions>, ShowOptionsValidator>());
+
         return services;
     }
 }

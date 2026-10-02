@@ -1,3 +1,4 @@
+using SeatReservation.Api.Auth;
 using SeatReservation.Api.Errors;
 using SeatReservation.Api.Health;
 using SeatReservation.Api.Json;
@@ -29,12 +30,15 @@ builder.Services.AddProblemDetails();
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddValidatedOptions(builder.Configuration);
+builder.Services.AddJwtAuth();
 builder.Services.AddReadinessChecks();
 builder.Services.AddHostedService<ShutdownDrain>();
 
 var app = builder.Build();
 
 app.UseExceptionHandler();
+app.UseAuthentication();
+app.UseAuthorization();
 app.MapControllers();
 app.MapHealthEndpoints();
 

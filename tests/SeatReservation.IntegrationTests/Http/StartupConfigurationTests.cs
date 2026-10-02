@@ -68,6 +68,7 @@ public sealed class StartupConfigurationTests : IAsyncLifetime
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["ConnectionStrings:Postgres"] = "Host=127.0.0.1;Port=1;Database=x;Username=x;Password=x",   // as appsettings.json would supply
+            ["Auth:SigningKey"] = ApiFactory.SigningKey,   // required outside Development; the case under test may override it
             [key] = value,
         });
         builder.Services.AddApplication();
@@ -78,5 +79,31 @@ public sealed class StartupConfigurationTests : IAsyncLifetime
         var ex = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
 
         Assert.Contains(expectedInMessage, ex.Message);
+    }
+
+    [Theory]
+    [InlineData("Production", true)]
+    [InlineData("Staging", true)]
+    [InlineData("Development", false)]
+    public async Task Missing_signing_key_fails_startup_only_outside_Development(string environment, bool shouldFail)
+    {
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true, EnvironmentName = environment });
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Postgres"] = "Host=127.0.0.1;Port=1;Database=x;Username=x;Password=x",
+        });
+        builder.Services.AddValidatedOptions(builder.Configuration);
+        using var host = builder.Build();
+
+        if (shouldFail)
+        {
+            var ex = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
+            Assert.Contains("Auth:SigningKey is required outside Development", ex.Message);
+        }
+        else
+        {
+            await host.StartAsync();
+            await host.StopAsync();
+        }
     }
 }

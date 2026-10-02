@@ -11,6 +11,7 @@ public static class ProblemFactory
     private static readonly Dictionary<string, string> Titles = new()
     {
         [ErrorCodes.Validation] = "One or more validation errors occurred.",
+        [ErrorCodes.Unauthorized] = "A valid bearer token is required.",
         [ErrorCodes.UnknownSeat] = "One or more seats do not exist in this show.",
         [ErrorCodes.ShowNotFound] = "The show was not found.",
         [ErrorCodes.ReservationNotFound] = "The reservation was not found.",

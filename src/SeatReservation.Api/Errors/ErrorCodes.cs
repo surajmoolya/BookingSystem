@@ -4,6 +4,7 @@ namespace SeatReservation.Api.Errors;
 public static class ErrorCodes
 {
     public const string Validation = "validation";
+    public const string Unauthorized = "unauthorized";
     public const string UnknownSeat = "unknown_seat";
     public const string ShowNotFound = "show_not_found";
     public const string ReservationNotFound = "reservation_not_found";

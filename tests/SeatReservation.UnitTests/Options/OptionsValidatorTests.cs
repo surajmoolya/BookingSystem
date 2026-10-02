@@ -60,6 +60,18 @@ public class OptionsValidatorTests
     }
 
     [Fact]
+    public void AddApplication_registers_the_system_clock_and_guid_generator()
+    {
+        var services = new ServiceCollection();
+        services.AddApplication();
+        using var provider = services.BuildServiceProvider();
+
+        Assert.IsType<SystemClock>(provider.GetRequiredService<SeatReservation.Application.Abstractions.IClock>());
+        var ids = provider.GetRequiredService<SeatReservation.Application.Abstractions.IIdGenerator>();
+        Assert.NotEqual(ids.NewId(), ids.NewId());
+    }
+
+    [Fact]
     public void AddApplication_twice_does_not_duplicate_validators()
     {
         var services = new ServiceCollection();

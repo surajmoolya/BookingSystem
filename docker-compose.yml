@@ -16,5 +16,18 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+  api:
+    build: .
+    environment:
+      ConnectionStrings__Postgres: Host=db;Port=5432;Database=seatres;Username=seatres;Password=seatres
+      # Local-only key; Render generates its own (render.yaml).
+      Auth__SigningKey: local-dev-signing-key-change-me-0123456789abcdef
+      ASPNETCORE_ENVIRONMENT: Production
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   pgdata: {}

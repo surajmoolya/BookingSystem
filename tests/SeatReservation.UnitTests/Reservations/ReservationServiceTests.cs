@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using SeatReservation.Application.Exceptions;
 using SeatReservation.Application.Options;
 using SeatReservation.Application.Reservations;
@@ -20,6 +21,8 @@ public class ReservationServiceTests
     private readonly SequentialIdGenerator _ids = new();
     private readonly FakeClock _clock = new();
     private readonly FakeReadinessState _readiness = new();
+    private readonly RecordingMetrics _metrics = new();
+    private readonly RecordingLogger<ReservationService> _logger = new();
 
     public ReservationServiceTests()
     {
@@ -38,7 +41,9 @@ public class ReservationServiceTests
         _ids,
         _clock,
         _readiness,
-        MsOptions.Create(new ReservationOptions { LockTimeout = LockTimeout }));
+        _metrics,
+        MsOptions.Create(new ReservationOptions { LockTimeout = LockTimeout }),
+        _logger);
 
     private static ReserveSeatsCommand Command(params string[] seats) =>
         new(ShowId, "alice", seats.Length == 0 ? ["A1"] : seats, "key-1");
@@ -103,6 +108,7 @@ public class ReservationServiceTests
 
         Assert.Equal(
             [
+                "Read.FastPath",
                 "Tx.Begin:reserve",
                 "SetLockTimeout",
                 "UserLock.Acquire:alice",
@@ -138,8 +144,12 @@ public class ReservationServiceTests
     [Fact]
     public async Task Unavailable_locked_seats_return_SeatTaken_listing_all_of_them_with_no_insert()
     {
-        _db.SetSeat(ShowId, "A3", SeatStatus.Confirmed, "bob", SequentialIdGenerator.IdFor(50));
-        _db.SetSeat(ShowId, "A2", SeatStatus.Held, null, null);
+        // Taken after the fast-path read, so only the locked path can see it.
+        _reservationReads.AfterFastPath = () =>
+        {
+            _db.SetSeat(ShowId, "A3", SeatStatus.Confirmed, "bob", SequentialIdGenerator.IdFor(50));
+            _db.SetSeat(ShowId, "A2", SeatStatus.Held, null, null);
+        };
 
         var outcome = await ReserveAsync(Command("A3", "A1", "A2"));
 
@@ -318,7 +328,7 @@ public class ReservationServiceTests
         Assert.Same(original, Assert.IsType<ReservationOutcome.Replayed>(outcome).Reservation);
         Assert.False(_tx.LastCommit);
         Assert.Equal(
-            ["Tx.Begin:reserve", "SetLockTimeout", "UserLock.Acquire:alice", "Reservations.FindByKey", "Tx.Rollback"],
+            ["Read.FastPath", "Tx.Begin:reserve", "SetLockTimeout", "UserLock.Acquire:alice", "Reservations.FindByKey", "Tx.Rollback"],
             _db.Calls);
         Assert.Single(_db.ReservationRows);
     }
@@ -438,5 +448,186 @@ public class ReservationServiceTests
         _db.NextInsertFailure = new DuplicateIdempotencyKeyException();
 
         await Assert.ThrowsAsync<InvariantViolationException>(() => ReserveAsync(Command("A1")));
+    }
+
+    // ---- fast path ----
+
+    [Fact]
+    public async Task Fast_path_uses_a_single_snapshot_call()
+    {
+        await ReserveAsync(Command("A1", "A2"));
+
+        Assert.Equal(1, _reservationReads.FastPathCalls);
+        Assert.Equal(0, _reservationReads.FindByKeyCalls);
+    }
+
+    [Fact]
+    public async Task Fast_path_declines_seats_owned_by_other_users_without_a_transaction()
+    {
+        _db.SetSeat(ShowId, "B1", SeatStatus.Confirmed, "bob", SequentialIdGenerator.IdFor(50));
+        _db.SetSeat(ShowId, "A10", SeatStatus.Held, null, null);
+
+        var outcome = await ReserveAsync(Command("B1", "A1", "A10"));
+
+        Assert.Equal(["A10", "B1"], Assert.IsType<ReservationOutcome.SeatTaken>(outcome).UnavailableSeats);
+        Assert.Equal(0, _tx.Invocations);
+        Assert.Equal(1, _reservationReads.FastPathCalls);
+    }
+
+    [Fact]
+    public async Task Fast_path_does_not_decline_a_seat_owned_by_the_same_user()
+    {
+        _db.AddConfirmedReservation(Reservation.Confirmed(
+            SequentialIdGenerator.IdFor(60), ShowId, "alice", "earlier", new byte[32], ["A1"], 25_000, _clock.UtcNow));
+
+        var outcome = await ReserveAsync(Command("A1"));   // a new key: the locked path decides (and declines)
+
+        Assert.Equal(["A1"], Assert.IsType<ReservationOutcome.SeatTaken>(outcome).UnavailableSeats);
+        Assert.Equal(1, _tx.Invocations);
+    }
+
+    [Fact]
+    public async Task An_existing_key_skips_the_fast_path_decline()
+    {
+        var original = await FirstReservationAsync();                                  // alice, key-1, A1+A2
+        _db.SetSeat(ShowId, "A3", SeatStatus.Confirmed, "bob", SequentialIdGenerator.IdFor(50));
+
+        var outcome = await ReserveAsync(Command("A3"));                               // key-1 reused for bob's seat
+
+        Assert.Equal(new ReservationOutcome.KeyConflict(original.Id), outcome);         // not seat_taken
+        Assert.Equal(2, _tx.Invocations);                                              // the first reserve, then this one
+    }
+
+    // ---- metrics and logs ----
+
+    [Fact]
+    public async Task Metrics_confirmed_only_on_Created()
+    {
+        await ReserveAsync(Command("A1", "A2"));
+
+        Assert.Equal([2], _metrics.ConfirmedSeatCounts);
+        Assert.Empty(_metrics.DeclinedReasons);
+    }
+
+    [Fact]
+    public async Task Metrics_replay_records_idempotent_replay_and_not_confirmed()
+    {
+        await FirstReservationAsync();
+        _metrics.ConfirmedSeatCounts.Clear();
+
+        await ReserveAsync(Command("A1", "A2"));
+
+        Assert.Empty(_metrics.ConfirmedSeatCounts);
+        Assert.Equal([DeclineReason.IdempotentReplay], _metrics.DeclinedReasons);
+    }
+
+    public static TheoryData<string, DeclineReason> Declines => new()
+    {
+        { "seat_taken_fast", DeclineReason.SeatTaken },
+        { "seat_taken_locked", DeclineReason.SeatTaken },
+        { "per_user_limit", DeclineReason.PerUserLimit },
+        { "key_conflict", DeclineReason.IdempotencyKeyConflict },
+        { "unknown_seat", DeclineReason.UnknownSeat },
+        { "show_not_found", DeclineReason.ShowNotFound },
+        { "validation", DeclineReason.Validation },
+    };
+
+    [Theory]
+    [MemberData(nameof(Declines))]
+    public async Task Metrics_each_decline_reason_recorded_once(string scenario, DeclineReason expected)
+    {
+        var command = Command("A3");
+        switch (scenario)
+        {
+            case "seat_taken_fast":
+                _db.SetSeat(ShowId, "A3", SeatStatus.Confirmed, "bob", SequentialIdGenerator.IdFor(50));
+                break;
+            case "seat_taken_locked":
+                _reservationReads.AfterFastPath = () => _db.SetSeat(ShowId, "A3", SeatStatus.Confirmed, "bob", SequentialIdGenerator.IdFor(50));
+                break;
+            case "per_user_limit":
+                command = Command("A1", "A2", "A3", "A10", "B1");
+                break;
+            case "key_conflict":
+                await FirstReservationAsync();
+                _metrics.ConfirmedSeatCounts.Clear();
+                break;
+            case "unknown_seat":
+                command = Command("Z9");
+                break;
+            case "show_not_found":
+                command = command with { ShowId = Guid.NewGuid() };
+                break;
+            case "validation":
+                command = command with { IdempotencyKey = "" };
+                break;
+        }
+
+        await ReserveAsync(command);
+
+        Assert.Equal([expected], _metrics.DeclinedReasons);
+        Assert.Empty(_metrics.ConfirmedSeatCounts);
+    }
+
+    [Fact]
+    public async Task Metrics_recorded_once_even_if_the_runner_retried_the_delegate()
+    {
+        _tx.SimulatedRetries = 2;
+
+        await ReserveAsync(Command("A1"));
+
+        Assert.Equal([1], _metrics.ConfirmedSeatCounts);
+        Assert.Empty(_metrics.DeclinedReasons);
+    }
+
+    [Fact]
+    public async Task Exceptions_record_no_metrics()
+    {
+        _tx.FailWith = new DependencyUnavailableException();
+        await Assert.ThrowsAsync<DependencyUnavailableException>(() => ReserveAsync(Command()));
+
+        _readiness.IsReady = false;
+        await Assert.ThrowsAsync<NotReadyException>(() => ReserveAsync(Command()));
+
+        Assert.Empty(_metrics.ConfirmedSeatCounts);
+        Assert.Empty(_metrics.DeclinedReasons);
+    }
+
+    [Fact]
+    public async Task Created_logs_reservation_confirmed_at_information()
+    {
+        var r = Assert.IsType<ReservationOutcome.Created>(await ReserveAsync(Command("A1"))).Reservation;
+
+        var entry = Assert.Single(_logger.Entries, e => e.Message.StartsWith("reservation.confirmed"));
+        Assert.Equal(LogLevel.Information, entry.Level);
+        Assert.Contains(r.Id.ToString(), entry.Message);
+    }
+
+    [Fact]
+    public async Task Declines_and_replays_log_at_debug_only()
+    {
+        await FirstReservationAsync();
+        _logger.Entries.Clear();
+
+        await ReserveAsync(Command("A1", "A2"));   // replay
+        await ReserveAsync(Command("A3"));         // key conflict
+
+        Assert.All(_logger.Entries, e => Assert.Equal(LogLevel.Debug, e.Level));
+        Assert.Single(_logger.Entries, e => e.Message.StartsWith("reservation.replayed"));
+        Assert.Single(_logger.Entries, e => e.Message.StartsWith("reservation.declined") && e.Message.Contains("IdempotencyKeyConflict"));
+    }
+
+    [Fact]
+    public async Task The_raw_idempotency_key_is_never_logged()
+    {
+        const string key = "super-secret-client-key-123";
+        var command = Command("A1") with { IdempotencyKey = key };
+
+        await ReserveAsync(command);
+        await ReserveAsync(command);   // replay
+
+        Assert.DoesNotContain(_logger.Entries, e => e.Message.Contains(key));
+        var attempt = _logger.Entries.First(e => e.Message.StartsWith("reservation.attempt")).Message;
+        Assert.Contains($"idempotency_key_hash={RequestHasherTests.Sha256Prefix(key)}", attempt);
     }
 }

@@ -43,6 +43,9 @@ public sealed class FakeReservationReadRepository(InMemoryUnitOfWork db) : IRese
 
     public int FastPathCalls { get; private set; }
 
+    /// <summary>Runs right after the fast-path snapshot is taken: the state changes between the snapshot and the transaction.</summary>
+    public Action? AfterFastPath { get; set; }
+
     public Task<Reservation?> FindByKeyAsync(string userId, string idempotencyKey, CancellationToken ct)
     {
         FindByKeyCalls++;
@@ -74,7 +77,9 @@ public sealed class FakeReservationReadRepository(InMemoryUnitOfWork db) : IRese
                 return new SeatOwner(l, row.Status, row.UserId);
             })
             .ToList();
-        return Task.FromResult(new FastPathSnapshot(db.FindByKey(userId, idempotencyKey), owners));
+        var snapshot = new FastPathSnapshot(db.FindByKey(userId, idempotencyKey), owners);
+        AfterFastPath?.Invoke();
+        return Task.FromResult(snapshot);
     }
 }
 

@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using SeatReservation.Application.Reservations;
 
 namespace SeatReservation.UnitTests.Reservations;
@@ -46,4 +48,8 @@ public class RequestHasherTests
             "5ea7f6827384928f69e35f35f95428678b0edfed341d5c4b616b09cc889024cb",
             Convert.ToHexString(RequestHasher.Compute(Show, ["B10", "A1", "A2"])).ToLowerInvariant());
     }
+
+    /// <summary>First 8 lowercase hex characters of SHA-256: how a key appears in logs (D-052).</summary>
+    internal static string Sha256Prefix(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))[..8].ToLowerInvariant();
 }

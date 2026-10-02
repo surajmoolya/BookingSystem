@@ -22,6 +22,7 @@ public static class DependencyInjection
 
         services.TryAddSingleton<IClock, SystemClock>();
         services.TryAddSingleton<IIdGenerator, GuidIdGenerator>();
+        services.TryAddSingleton<IReservationMetrics, NullReservationMetrics>();
 
         services.TryAddSingleton<AuthService>();
         services.TryAddSingleton<CreateShowValidator>();

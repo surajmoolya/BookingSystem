@@ -1,3 +1,7 @@
+using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SeatReservation.Application.Abstractions;
 using SeatReservation.Application.Exceptions;
@@ -18,9 +22,24 @@ public sealed class ReservationService(
     IIdGenerator ids,
     IClock clock,
     IReadinessState readiness,
-    IOptions<ReservationOptions> options)
+    IReservationMetrics metrics,
+    IOptions<ReservationOptions> options,
+    ILogger<ReservationService> logger)
 {
+    /// <summary>
+    /// Decides, then records the outcome exactly once: after the transaction has finished, so a retried delegate never
+    /// counts twice. A thrown exception records nothing here; it surfaces as a 5xx and is counted at the HTTP layer.
+    /// </summary>
     public async Task<ReservationOutcome> ReserveAsync(ReserveSeatsCommand command, CancellationToken ct)
+    {
+        var started = Stopwatch.GetTimestamp();
+        LogAttempt(command);
+        var outcome = await DecideAsync(command, ct);
+        Record(command, outcome, Stopwatch.GetElapsedTime(started));
+        return outcome;
+    }
+
+    private async Task<ReservationOutcome> DecideAsync(ReserveSeatsCommand command, CancellationToken ct)
     {
         if (!readiness.IsReady)
         {
@@ -49,6 +68,23 @@ public sealed class ReservationService(
         // Ordinal sort: every transaction takes seat row locks in the same order, so two of them can't deadlock (D-030).
         var sorted = command.Seats.Select(s => s!).Order(StringComparer.Ordinal).ToArray();
         var hash = RequestHasher.Compute(command.ShowId, sorted);
+
+        // Fast path: autocommit, no locks, one round trip (D-036, D-088). It can only decline: a seat another user owns
+        // stays taken until that user cancels, so the locked path would decline too. When the key is already used, the
+        // locked path decides (replay or conflict), and a seat this user owns may be a replay, so neither declines here.
+        var snapshot = await reservationReads.GetFastPathSnapshotAsync(command.UserId, command.IdempotencyKey, command.ShowId, sorted, ct);
+        if (snapshot.ExistingForKey is null)
+        {
+            var takenByOthers = snapshot.Owners
+                .Where(o => o.Status != SeatStatus.Available && o.UserId != command.UserId)
+                .Select(o => o.Label)
+                .Order(StringComparer.Ordinal)
+                .ToArray();
+            if (takenByOthers.Length > 0)
+            {
+                return new ReservationOutcome.SeatTaken(takenByOthers);
+            }
+        }
 
         try
         {
@@ -127,5 +163,48 @@ public sealed class ReservationService(
         }
 
         return TxResult<ReservationOutcome>.CommitWith(new ReservationOutcome.Created(reservation));
+    }
+
+    private void Record(ReserveSeatsCommand command, ReservationOutcome outcome, TimeSpan elapsed)
+    {
+        switch (outcome)
+        {
+            case ReservationOutcome.Created created:
+                var r = created.Reservation;
+                metrics.Confirmed(r.Seats.Count);
+                logger.LogInformation(
+                    "reservation.confirmed reservation_id={ReservationId} user_id={UserId} show_id={ShowId} seats={Seats} amount_paise={AmountPaise} duration_ms={DurationMs}",
+                    r.Id, r.UserId, r.ShowId, r.Seats, r.AmountPaise, elapsed.TotalMilliseconds);
+                break;
+
+            // Debug, not Information: during a burst the request log line already carries the outcome (D-088).
+            case ReservationOutcome.Replayed replayed:
+                metrics.Declined(DeclineReason.IdempotentReplay);
+                logger.LogDebug(
+                    "reservation.replayed reservation_id={ReservationId} user_id={UserId}", replayed.Reservation.Id, command.UserId);
+                break;
+
+            default:
+                var reason = outcome.DeclineReason!.Value;
+                metrics.Declined(reason);
+                logger.LogDebug(
+                    "reservation.declined reason={Reason} user_id={UserId} show_id={ShowId} unavailable_seats={UnavailableSeats}",
+                    reason, command.UserId, command.ShowId, (outcome as ReservationOutcome.SeatTaken)?.UnavailableSeats);
+                break;
+        }
+    }
+
+    // The raw key is never logged (D-052): only the first 8 hex characters of its SHA-256.
+    private void LogAttempt(ReserveSeatsCommand command)
+    {
+        if (!logger.IsEnabled(LogLevel.Debug))
+        {
+            return;
+        }
+
+        var keyHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(command.IdempotencyKey ?? string.Empty)))[..8].ToLowerInvariant();
+        logger.LogDebug(
+            "reservation.attempt user_id={UserId} show_id={ShowId} seat_count={SeatCount} idempotency_key_hash={IdempotencyKeyHash}",
+            command.UserId, command.ShowId, command.Seats.Count, keyHash);
     }
 }

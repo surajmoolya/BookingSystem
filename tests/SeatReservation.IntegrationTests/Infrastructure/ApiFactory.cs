@@ -65,6 +65,7 @@ public sealed class ApiFactory(
     {
         builder.UseSetting("ConnectionStrings:Postgres", ConnectionString);
         builder.UseSetting("Auth:SigningKey", SigningKey);
+        builder.UseSetting("Shutdown:DrainSeconds", "0");   // no 5s drain on every factory dispose
         foreach (var (key, value) in settings ?? new Dictionary<string, string?>())
         {
             builder.UseSetting(key, value);

@@ -59,6 +59,7 @@ public sealed class StartupConfigurationTests : IAsyncLifetime
     [InlineData("Auth:SigningKey", "too-short", "Auth:SigningKey")]                         // Api
     [InlineData("Admission:PermitLimit", "0", "Admission:PermitLimit")]                     // Api
     [InlineData("Metrics:MaxShowsInGauges", "0", "Metrics:MaxShowsInGauges")]               // Api
+    [InlineData("Shutdown:DrainSeconds", "26", "Shutdown:DrainSeconds")]                    // Api
     public async Task Invalid_configuration_fails_startup_naming_the_key(string key, string value, string expectedInMessage)
     {
         // A plain Host rather than WebApplicationFactory: when startup throws, the _factory's deferred host races

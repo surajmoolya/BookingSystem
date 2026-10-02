@@ -16,6 +16,7 @@ public static class OptionsSetup
         services.AddValidated<AuthOptions, AuthOptionsValidator>(configuration, AuthOptions.SectionName);
         services.AddValidated<AdmissionOptions, AdmissionOptionsValidator>(configuration, AdmissionOptions.SectionName);
         services.AddValidated<MetricsOptions, MetricsOptionsValidator>(configuration, MetricsOptions.SectionName);
+        services.AddValidated<ShutdownOptions, ShutdownOptionsValidator>(configuration, ShutdownOptions.SectionName);
 
         // Validators for these two come from AddApplication().
         services.AddOptions<ReservationOptions>().Bind(configuration.GetSection(ReservationOptions.SectionName)).ValidateOnStart();

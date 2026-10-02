@@ -30,6 +30,7 @@ builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddValidatedOptions(builder.Configuration);
 builder.Services.AddReadinessChecks();
+builder.Services.AddHostedService<ShutdownDrain>();
 
 var app = builder.Build();
 

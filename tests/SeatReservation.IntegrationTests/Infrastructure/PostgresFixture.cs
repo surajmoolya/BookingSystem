@@ -26,7 +26,7 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     /// <summary>Connection string for a database on the container, whether or not it exists yet.</summary>
     public string ConnectionStringFor(string database) =>
-        new NpgsqlConnectionStringBuilder(ConnectionString) { Database = database, Pooling = false }.ConnectionString;
+        new NpgsqlConnectionStringBuilder(ConnectionString) { Database = database }.ConnectionString;
 
     public async Task CreateDatabaseNamedAsync(string name)
     {

@@ -73,6 +73,8 @@ public class MigrationRunnerTests(PostgresFixture postgres)
         await using var probe = new NpgsqlCommand($"SELECT pg_try_advisory_lock({MigrationRunner.AdvisoryLockKey})", other);
 
         Assert.True((bool)(await probe.ExecuteScalarAsync())!);
+        await using var unlock = new NpgsqlCommand($"SELECT pg_advisory_unlock({MigrationRunner.AdvisoryLockKey})", other);   // the pooled probe must not leak it
+        await unlock.ExecuteScalarAsync();
     }
 
     [Fact]

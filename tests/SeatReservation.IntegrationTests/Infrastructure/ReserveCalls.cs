@@ -7,8 +7,8 @@ using Npgsql;
 
 namespace SeatReservation.IntegrationTests.Infrastructure;
 
-/// <summary>One reserve response, reduced to what concurrency tests count: status, problem <c>code</c>, and the body.</summary>
-public sealed record ReserveResult(HttpStatusCode Status, string? Code, JsonElement Body)
+/// <summary>One reserve response, reduced to what concurrency tests count: status, problem <c>code</c>, the body, and whether it was a replay.</summary>
+public sealed record ReserveResult(HttpStatusCode Status, string? Code, JsonElement Body, bool Replayed = false)
 {
     public bool Is(HttpStatusCode status, string? code = null) => Status == status && (code is null || Code == code);
 
@@ -45,7 +45,8 @@ public static class ReserveCalls
         using var response = await client.SendAsync(request);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         var code = body.ValueKind == JsonValueKind.Object && body.TryGetProperty("code", out var c) ? c.GetString() : null;
-        return new ReserveResult(response.StatusCode, code, body);
+        var replayed = response.Headers.TryGetValues("Idempotent-Replayed", out var values) && values.Single() == "true";
+        return new ReserveResult(response.StatusCode, code, body, replayed);
     }
 
     /// <summary>"201×1, 409 seat_taken×199": printed in assertion messages so a failure shows the whole outcome mix.</summary>

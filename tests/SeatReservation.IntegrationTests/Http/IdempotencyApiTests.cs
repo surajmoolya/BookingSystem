@@ -147,6 +147,25 @@ public class IdempotencyApiTests(ApiFixture api) : IClassFixture<ApiFixture>
         AssertReplayOf(original, await ReserveAsync(showId, ["A4", "A3", "A2", "A1"], bodyKey: "key-1"));   // not per_user_limit
     }
 
-    [Fact(Skip = "Needs cancellation (M4, D-041): replay after cancel returns the cancelled reservation.")]
-    public Task A_replay_after_cancellation_returns_the_cancelled_reservation() => Task.CompletedTask;
+    [Fact]
+    public async Task A_replay_after_cancellation_returns_the_cancelled_reservation()
+    {
+        var showId = await NewShowAsync();
+        var original = await CreatedAsync(showId, ["A1", "A2"], "key-1");
+        using var cancel = new HttpRequestMessage(HttpMethod.Post, $"/reservations/{original.ReservationId}/cancel");
+        cancel.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestTokens.Create(_alice));
+        using var cancelled = await api.Client.SendAsync(cancel);
+        Assert.Equal(HttpStatusCode.OK, cancelled.StatusCode);
+
+        var replay = await ReserveAsync(showId, ["A2", "A1"], bodyKey: "key-1");
+
+        // D-041: the key's attempt ended as this (now cancelled) reservation; a retry must not book the seats again.
+        Assert.Equal(HttpStatusCode.OK, replay.Status);
+        Assert.True(replay.Replayed);
+        Assert.Equal(original.ReservationId, replay.ReservationId);
+        Assert.Equal("cancelled", replay.Json.GetProperty("status").GetString());
+        Assert.Equal(await cancelled.Content.ReadAsStringAsync(), replay.Raw);
+        Assert.Equal(1, await ReservationsAsync());
+        Assert.Equal(0, await ScalarAsync(api.Factory.ConnectionString, $"SELECT count(*) FROM seats WHERE show_id = '{showId}' AND status <> 'available'"));
+    }
 }

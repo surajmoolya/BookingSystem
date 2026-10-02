@@ -299,6 +299,29 @@ public class ReservationRepositorySqlTests(PostgresFixture postgres)
         Assert.Equal(1, await db.CountAsync($"SELECT count(*) FROM seats WHERE show_id = '{showId}' AND label = 'A3' AND user_id = 'bob'"));
     }
 
+    [Fact]
+    public async Task A_stale_release_never_frees_a_seat_rebooked_by_another_reservation()
+    {
+        await using var db = await MigratedDatabase.CreateAsync(postgres);
+        var showId = await NewShowAsync(db, "A1");
+        var alices = NewReservation(showId, "alice", "k1", "A1");
+        await ReserveAsync(db, alices);
+        await using (var cancel = await OpenTx.BeginAsync(db))
+        {
+            await cancel.Uow.Seats.ReleaseByReservationAsync(alices.Id, CancellationToken.None);
+            await cancel.Transaction.CommitAsync();
+        }
+
+        var bobs = NewReservation(showId, "bob", "k1", "A1");
+        await ReserveAsync(db, bobs);
+
+        await using var stale = await OpenTx.BeginAsync(db);
+        Assert.Equal(0, await stale.Uow.Seats.ReleaseByReservationAsync(alices.Id, CancellationToken.None));
+        await stale.Transaction.CommitAsync();
+
+        Assert.Equal(1, await db.CountAsync($"SELECT count(*) FROM seats WHERE show_id = '{showId}' AND label = 'A1' AND status = 'confirmed' AND user_id = 'bob' AND reservation_id = '{bobs.Id}'"));
+    }
+
     // ---- UserLock ----
 
     [Fact]

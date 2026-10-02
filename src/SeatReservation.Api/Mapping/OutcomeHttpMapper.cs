@@ -77,6 +77,31 @@ public static class OutcomeHttpMapper
         }
     }
 
+    /// <summary>lld §5.5: a fresh cancel and a repeated one look the same to the client, 200 with the cancelled reservation.</summary>
+    public static IActionResult ToResult(CancelOutcome outcome, ControllerBase controller) => outcome switch
+    {
+        CancelOutcome.Cancelled cancelled => controller.Ok(DtoMapper.ToResponse(cancelled.Reservation)),
+        CancelOutcome.AlreadyCancelled already => controller.Ok(DtoMapper.ToResponse(already.Reservation)),
+        CancelOutcome.NotOwner => NotOwner(controller),
+        CancelOutcome.NotFound => ReservationNotFound(controller),
+        _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome, null),
+    };
+
+    public static IActionResult ToResult(GetReservationOutcome outcome, ControllerBase controller) => outcome switch
+    {
+        GetReservationOutcome.Found found => controller.Ok(DtoMapper.ToResponse(found.Reservation)),
+        GetReservationOutcome.NotOwner => NotOwner(controller),
+        GetReservationOutcome.NotFound => ReservationNotFound(controller),
+        _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome, null),
+    };
+
+    public static ObjectResult ReservationNotFound(ControllerBase controller) =>
+        ProblemFactory.ToResult(ProblemFactory.Create(controller.HttpContext, StatusCodes.Status404NotFound, ErrorCodes.ReservationNotFound));
+
+    // 403, not 404, for another user's reservation (D-022).
+    private static ObjectResult NotOwner(ControllerBase controller) =>
+        ProblemFactory.ToResult(ProblemFactory.Create(controller.HttpContext, StatusCodes.Status403Forbidden, ErrorCodes.NotOwner));
+
     public static ObjectResult ShowNotFound(ControllerBase controller) =>
         ProblemFactory.ToResult(ProblemFactory.Create(controller.HttpContext, StatusCodes.Status404NotFound, ErrorCodes.ShowNotFound));
 

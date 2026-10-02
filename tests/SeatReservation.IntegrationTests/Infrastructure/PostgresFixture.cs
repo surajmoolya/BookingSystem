@@ -1,3 +1,4 @@
+using Npgsql;
 using Testcontainers.PostgreSql;
 
 namespace SeatReservation.IntegrationTests.Infrastructure;
@@ -12,6 +13,20 @@ public sealed class PostgresFixture : IAsyncLifetime
         .Build();
 
     public string ConnectionString => _container.GetConnectionString();
+
+    /// <summary>Creates an empty, uniquely named database on the container and returns a connection string to it.</summary>
+    public async Task<string> CreateDatabaseAsync()
+    {
+        var name = $"t_{Guid.NewGuid():N}";
+        await using (var admin = new NpgsqlConnection(ConnectionString))
+        {
+            await admin.OpenAsync();
+            await using var create = new NpgsqlCommand($"CREATE DATABASE {name}", admin);
+            await create.ExecuteNonQueryAsync();
+        }
+
+        return new NpgsqlConnectionStringBuilder(ConnectionString) { Database = name, Pooling = false }.ConnectionString;
+    }
 
     public Task InitializeAsync() => _container.StartAsync();
 

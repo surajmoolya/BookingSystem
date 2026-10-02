@@ -38,6 +38,13 @@ public sealed class ReservationService(
             return invalid;
         }
 
+        // Over the limit whatever the user already holds: no need to ask the database.
+        var limit = definition.Show.PerUserLimit;
+        if (command.Seats.Count > limit)
+        {
+            return new ReservationOutcome.PerUserLimit(limit, Held: 0, Requested: command.Seats.Count);
+        }
+
         // Ordinal sort: every transaction takes seat row locks in the same order, so two of them can't deadlock (D-030).
         var sorted = command.Seats.Select(s => s!).Order(StringComparer.Ordinal).ToArray();
         var hash = RequestHasher.Compute(command.ShowId, sorted);
@@ -46,7 +53,7 @@ public sealed class ReservationService(
     }
 
     // Runs inside the transaction and may be re-run whole on a transient error, so it must not touch anything but the
-    // unit of work. The order of calls is: lock timeout → user lock → lock seats → insert → confirm.
+    // unit of work. The order of calls is: lock timeout → user lock → count held → lock seats → insert → confirm.
     private async Task<TxResult<ReservationOutcome>> ReserveLockedAsync(
         IUnitOfWork uow,
         ReserveSeatsCommand command,
@@ -57,6 +64,14 @@ public sealed class ReservationService(
     {
         await uow.SetLockTimeoutAsync(options.Value.LockTimeout, ct);
         await uow.UserLock.AcquireAsync(command.UserId, ct);
+
+        // Counted under the user lock, so this user's concurrent requests see each other's committed seats and can't
+        // jointly exceed the limit (D-035). Counted before the seat locks, so a declined request never waits on them.
+        var held = await uow.Seats.CountConfirmedByUserAsync(command.ShowId, command.UserId, ct);
+        if (held + sorted.Length > show.PerUserLimit)
+        {
+            return TxResult<ReservationOutcome>.RollbackWith(new ReservationOutcome.PerUserLimit(show.PerUserLimit, held, sorted.Length));
+        }
 
         var locked = await uow.Seats.LockForUpdateAsync(command.ShowId, sorted, ct);
         var unavailable = locked.Where(s => s.Status != SeatStatus.Available).Select(s => s.Label).ToArray();

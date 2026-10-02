@@ -103,6 +103,7 @@ public class ReservationServiceTests
                 "Tx.Begin:reserve",
                 "SetLockTimeout",
                 "UserLock.Acquire:alice",
+                "Seats.CountConfirmedByUser",
                 "Seats.LockForUpdate:A1,A2",
                 "Reservations.Insert",
                 "Seats.Confirm:A1,A2",
@@ -212,5 +213,84 @@ public class ReservationServiceTests
         var r = Assert.IsType<ReservationOutcome.Created>(outcome).Reservation;
         Assert.Equal([r.Id], _db.ReservationRows.Keys);
         Assert.Equal(r.Id, _db.Seat(ShowId, "A1").ReservationId);
+    }
+
+    // ---- per-user limit ----
+
+    private void GiveAliceSeats(params string[] labels) =>
+        _db.AddConfirmedReservation(Reservation.Confirmed(
+            SequentialIdGenerator.IdFor(60), ShowId, "alice", "earlier", new byte[32], labels, 25_000 * labels.Length, _clock.UtcNow));
+
+    [Fact]
+    public async Task Request_larger_than_the_limit_returns_PerUserLimit_without_touching_the_db()
+    {
+        await WarmCatalogAsync();
+
+        var outcome = await ReserveAsync(Command("A1", "A2", "A3", "A10", "B1"));   // limit is 4
+
+        Assert.Equal(new ReservationOutcome.PerUserLimit(4, 0, 5), outcome);
+        Assert.Empty(_db.Calls);
+        Assert.Equal(0, _tx.Invocations);
+    }
+
+    [Fact]
+    public async Task Held_plus_requested_over_the_limit_returns_PerUserLimit_and_rolls_back()
+    {
+        GiveAliceSeats("A1", "A2", "A3");
+
+        var outcome = await ReserveAsync(Command("A10", "B1"));
+
+        Assert.Equal(new ReservationOutcome.PerUserLimit(4, 3, 2), outcome);
+        Assert.False(_tx.LastCommit);
+        Assert.DoesNotContain(_db.Calls, c => c.StartsWith("Seats.LockForUpdate"));
+        Assert.DoesNotContain("Reservations.Insert", _db.Calls);
+        Assert.Equal(SeatStatus.Available, _db.Seat(ShowId, "A10").Status);
+    }
+
+    [Fact]
+    public async Task Held_plus_requested_exactly_at_the_limit_succeeds()
+    {
+        GiveAliceSeats("A1", "A2", "A3");
+
+        Assert.IsType<ReservationOutcome.Created>(await ReserveAsync(Command("A10")));
+    }
+
+    [Fact]
+    public async Task Only_this_users_seats_count_towards_the_limit()
+    {
+        _db.SetSeat(ShowId, "A1", SeatStatus.Confirmed, "bob", SequentialIdGenerator.IdFor(70));
+        _db.SetSeat(ShowId, "A2", SeatStatus.Confirmed, "bob", SequentialIdGenerator.IdFor(70));
+
+        Assert.IsType<ReservationOutcome.Created>(await ReserveAsync(Command("A3", "A10", "B1")));
+    }
+
+    [Fact]
+    public async Task Held_count_happens_after_the_user_lock_and_before_the_seat_lock()
+    {
+        await ReserveAsync(Command("A1"));
+
+        var userLock = _db.Calls.IndexOf("UserLock.Acquire:alice");
+        var count = _db.Calls.IndexOf("Seats.CountConfirmedByUser");
+        var seatLock = _db.Calls.FindIndex(c => c.StartsWith("Seats.LockForUpdate"));
+        Assert.True(userLock < count && count < seatLock, string.Join(" → ", _db.Calls));
+    }
+
+    [Fact]
+    public async Task A_custom_per_show_limit_is_respected()
+    {
+        var showId = SequentialIdGenerator.IdFor(300);
+        _db.AddShow(new ShowInfo(showId, "tight", 100, 2, 4), ["A1", "A2", "A3", "A4"]);
+        var service = Service();
+
+        Assert.IsType<ReservationOutcome.Created>(
+            await service.ReserveAsync(new ReserveSeatsCommand(showId, "alice", ["A1"], "k1"), CancellationToken.None));
+        Assert.IsType<ReservationOutcome.Created>(
+            await service.ReserveAsync(new ReserveSeatsCommand(showId, "alice", ["A2"], "k2"), CancellationToken.None));
+
+        var third = await service.ReserveAsync(new ReserveSeatsCommand(showId, "alice", ["A3"], "k3"), CancellationToken.None);
+        Assert.Equal(new ReservationOutcome.PerUserLimit(2, 2, 1), third);
+
+        var tooBig = await service.ReserveAsync(new ReserveSeatsCommand(showId, "carol", ["A3", "A4", "A1"], "k1"), CancellationToken.None);
+        Assert.Equal(new ReservationOutcome.PerUserLimit(2, 0, 3), tooBig);
     }
 }

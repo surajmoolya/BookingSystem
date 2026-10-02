@@ -26,6 +26,7 @@ public static class JwtSetup
         services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
             .Configure<IOptions<AuthOptions>, SigningKeyProvider>((bearer, auth, key) => Configure(bearer, auth.Value, key));
         services.AddAuthorization();
+        services.AddAuthPolicies();
 
         return services;
     }

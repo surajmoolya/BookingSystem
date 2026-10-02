@@ -21,7 +21,11 @@ else if (string.IsNullOrWhiteSpace(builder.Configuration["urls"]))
 }
 
 builder.Services.AddControllers()
-    .AddJsonOptions(o => JsonSetup.Configure(o.JsonSerializerOptions))
+    .AddJsonOptions(o =>
+    {
+        JsonSetup.Configure(o.JsonSerializerOptions);
+        o.AllowInputFormatterExceptionMessages = false;   // never echo parser text (.NET type names, byte offsets) in a 400
+    })
     .ConfigureApiBehaviorOptions(o => o.InvalidModelStateResponseFactory = context =>
         ProblemFactory.ToResult(ProblemFactory.Validation(context.HttpContext, ModelStateErrors.From(context.ModelState))));
 builder.Services.ConfigureHttpJsonOptions(o => JsonSetup.Configure(o.SerializerOptions));

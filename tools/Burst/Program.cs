@@ -1,5 +1,8 @@
-// Burst: concurrent load and correctness checker for the seat reservation service.
-// Scenarios, the runner and the report are added in T-3.15 and M7 (lld §12).
+// Burst: concurrent load and correctness checker for the seat reservation service (lld §12).
+// T-3.15 builds the minimum for the first remote check (hot seat + mixed storm); M7 adds the remaining scenarios.
+
+using System.Text.Json;
+using Burst;
 
 const string Usage = """
     Usage: burst <BASE_URL> [options]
@@ -7,10 +10,8 @@ const string Usage = """
     Fires concurrent reservation traffic at a running service and checks the results.
 
     Options:
-      --scenario <list>        hot,idem,conflict,limit,mixed,cancel (default: all)
+      --scenario <list>        hot,mixed (default: all; idem,conflict,limit,cancel arrive in M7)
       --hot-users <n>          distinct users hitting one seat (default: 500)
-      --idem-requests <n>      concurrent same-key requests (default: 200)
-      --limit-requests <n>     one user, distinct seats (default: 50)
       --mixed-requests <n>     total mixed-storm requests (default: 20000)
       --mixed-users <n>        (default: 5000)
       --mixed-seats <n>        (default: 1000)
@@ -30,5 +31,56 @@ if (args.Length == 0 || args.Any(a => a is "-h" or "--help"))
     return args.Length == 0 ? 1 : 0;
 }
 
-Console.Error.WriteLine("Scenarios are not implemented yet. Run with --help for usage.");
-return 1;
+if (!BurstOptions.TryParse(args, out var options, out var error))
+{
+    Console.Error.WriteLine(error);
+    return 1;
+}
+
+ThreadPool.SetMinThreads(256, 256);   // thousands of requests are released at once; don't let the pool ramp up slowly
+
+using var client = new ServiceClient(options);
+Console.WriteLine($"target {options.BaseUrl}  scenarios {string.Join(",", options.Scenarios)}  timeout {options.TimeoutSeconds}s  " +
+                  $"max-connections {options.MaxConnections}  http2 {options.Http2}  key-in {options.KeyIn}");
+await client.WaitUntilReadyAsync(TimeSpan.FromMinutes(5));
+Console.WriteLine("service ready");
+Console.WriteLine();
+
+var scenarios = new Scenarios(client, options);
+var results = new List<ScenarioResult>();
+foreach (var name in options.Scenarios)
+{
+    var (result, lines) = name switch
+    {
+        "hot" => await scenarios.HotSeatAsync(),
+        "mixed" => await scenarios.MixedStormAsync(),
+        _ => throw new InvalidOperationException($"Scenario '{name}' is not wired."),
+    };
+    Report.Scenario(result, lines);
+    results.Add(result);
+}
+
+Report.Totals(results);
+
+if (options.JsonPath is { } path)
+{
+    var report = new
+    {
+        target = options.BaseUrl.ToString(),
+        at = DateTimeOffset.UtcNow,
+        pass = results.All(r => r.Pass),
+        scenarios = results.Select(r => new
+        {
+            name = r.Name,
+            pass = r.Pass,
+            failures = r.Failures,
+            requests = r.Outcomes.Length,
+            elapsed_seconds = r.Elapsed.TotalSeconds,
+            buckets = Report.Buckets(r.Outcomes).ToDictionary(b => b.Bucket, b => b.Count),
+            latency_ms = Report.Latency(r.Outcomes),
+        }),
+    };
+    await File.WriteAllTextAsync(path, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+}
+
+return results.All(r => r.Pass) ? 0 : 1;

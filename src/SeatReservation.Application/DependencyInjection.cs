@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using SeatReservation.Application.Abstractions;
 using SeatReservation.Application.Auth;
 using SeatReservation.Application.Options;
+using SeatReservation.Application.Shows;
 
 namespace SeatReservation.Application;
 
@@ -22,6 +23,9 @@ public static class DependencyInjection
         services.TryAddSingleton<IIdGenerator, GuidIdGenerator>();
 
         services.TryAddSingleton<AuthService>();
+        services.TryAddSingleton<CreateShowValidator>();
+        services.TryAddSingleton<ShowCatalog>();
+        services.TryAddSingleton<ShowService>();
 
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<ReservationOptions>, ReservationOptionsValidator>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<ShowOptions>, ShowOptionsValidator>());

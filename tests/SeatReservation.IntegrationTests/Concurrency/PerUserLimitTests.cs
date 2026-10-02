@@ -42,6 +42,24 @@ public class PerUserLimitTests(ApiFixture api) : IClassFixture<ApiFixture>
     }
 
     [Fact]
+    public async Task Cancelling_one_seat_at_the_limit_frees_room_for_one_more_but_not_two()
+    {
+        var showId = await CreateShowAsync(api.Client, Labels(10));
+        Assert.True((await ReserveAsync(api.Client, showId, _alice, ["S1", "S2", "S3"], "k1")).Is(HttpStatusCode.Created));
+        var single = await ReserveAsync(api.Client, showId, _alice, ["S4"], "k2");
+        Assert.True(single.Is(HttpStatusCode.Created), single.ToString());
+        AssertLimit(await ReserveAsync(api.Client, showId, _alice, ["S5"], "k3"), limit: 4, held: 4, requested: 1);
+
+        Assert.True((await CancelAsync(api.Client, single.ReservationId, _alice)).Is(HttpStatusCode.OK));
+
+        // Held is now 3: two more would make 5, one more makes exactly 4, and then the limit is reached again.
+        AssertLimit(await ReserveAsync(api.Client, showId, _alice, ["S5", "S6"], "k4"), limit: 4, held: 3, requested: 2);
+        Assert.True((await ReserveAsync(api.Client, showId, _alice, ["S5"], "k5")).Is(HttpStatusCode.Created));
+        AssertLimit(await ReserveAsync(api.Client, showId, _alice, ["S6"], "k6"), limit: 4, held: 4, requested: 1);
+        Assert.Equal(4, await SeatsOwnedAsync(showId, _alice));
+    }
+
+    [Fact]
     public async Task A_five_seat_request_is_rejected_outright()
     {
         var showId = await CreateShowAsync(api.Client, Labels(10));

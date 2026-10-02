@@ -74,12 +74,19 @@ public sealed class ShutdownDrainTests
         var drain = new ShutdownDrain(
             Microsoft.Extensions.Options.Options.Create(new ShutdownOptions { DrainSeconds = 25 }),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<ShutdownDrain>.Instance);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+        using var timeout = new CancellationTokenSource();
+
+        var draining = drain.StoppingAsync(timeout.Token);
+        await Task.Delay(200);
+        Assert.False(draining.IsCompleted, "the 25s drain finished before the shutdown timeout fired");
 
         var stopwatch = Stopwatch.StartNew();
-        await drain.StoppingAsync(timeout.Token);
+        timeout.Cancel();
+        await draining.WaitAsync(TimeSpan.FromSeconds(15));   // throws TimeoutException if cancellation were ignored
 
-        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(2), $"drain took {stopwatch.Elapsed}");
+        // Far below the 25s drain, with headroom for a starved thread pool on a loaded CI runner (CI once measured 2.9s
+        // for what takes milliseconds locally, when the bound here was 2s).
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(10), $"drain took {stopwatch.Elapsed} after cancellation");
     }
 
     private static WebApplication BuildApp(int drainSeconds)

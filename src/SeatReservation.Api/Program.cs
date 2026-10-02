@@ -29,6 +29,7 @@ builder.Services.AddProblemDetails();
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddValidatedOptions(builder.Configuration);
+builder.Services.AddReadinessChecks();
 
 var app = builder.Build();
 

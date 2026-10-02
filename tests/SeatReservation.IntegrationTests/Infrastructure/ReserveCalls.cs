@@ -49,6 +49,18 @@ public static class ReserveCalls
         return new ReserveResult(response.StatusCode, code, body, replayed);
     }
 
+    /// <summary>One cancel as <paramref name="userId"/>; the body is the reservation (200) or a problem.</summary>
+    public static async Task<ReserveResult> CancelAsync(HttpClient client, Guid reservationId, string userId)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/reservations/{reservationId}/cancel");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", TestTokens.Create(userId));
+
+        using var response = await client.SendAsync(request);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var code = body.ValueKind == JsonValueKind.Object && body.TryGetProperty("code", out var c) ? c.GetString() : null;
+        return new ReserveResult(response.StatusCode, code, body);
+    }
+
     /// <summary>"201×1, 409 seat_taken×199": printed in assertion messages so a failure shows the whole outcome mix.</summary>
     public static string Histogram(IEnumerable<ReserveResult> results) =>
         string.Join(", ", results.GroupBy(r => r.ToString()).OrderBy(g => g.Key, StringComparer.Ordinal).Select(g => $"{g.Key}×{g.Count()}"));

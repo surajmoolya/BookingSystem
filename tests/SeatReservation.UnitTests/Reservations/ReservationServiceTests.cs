@@ -186,6 +186,16 @@ public class ReservationServiceTests
     }
 
     [Fact]
+    public async Task Created_at_is_stamped_at_the_microsecond_precision_postgres_keeps()
+    {
+        _clock.UtcNow = new DateTimeOffset(2026, 10, 3, 9, 0, 0, TimeSpan.Zero).AddTicks(1_234_567);   // 0.1234567 s
+
+        var r = Assert.IsType<ReservationOutcome.Created>(await ReserveAsync(Command("A1"))).Reservation;
+
+        Assert.Equal(_clock.UtcNow.AddTicks(-7), r.CreatedAt);   // 0.123456 s
+    }
+
+    [Fact]
     public async Task Amount_overflow_throws_and_rolls_back()
     {
         _db.AddShow(new ShowInfo(SequentialIdGenerator.IdFor(200), "pricey", long.MaxValue, 4, 2), ["A1", "A2"]);

@@ -6,11 +6,13 @@ namespace SeatReservation.Infrastructure.Transactions;
 
 /// <summary>
 /// The repositories bound to one connection and one transaction. The runner creates one per attempt and disposes it with
-/// the transaction. The repository properties are filled in by the tasks that own their SQL
-/// (user lock, reservations, seats: T-3.6).
+/// the transaction. Repositories are created on first use.
 /// </summary>
 public sealed class PgUnitOfWork(NpgsqlConnection connection, NpgsqlTransaction transaction) : IUnitOfWork
 {
+    private UserLock? _userLock;
+    private ReservationRepository? _reservations;
+    private SeatRepository? _seats;
     private ShowRepository? _shows;
 
     /// <summary>The connection the transaction runs on. Repositories use it with <see cref="Transaction"/>.</summary>
@@ -18,11 +20,11 @@ public sealed class PgUnitOfWork(NpgsqlConnection connection, NpgsqlTransaction 
 
     public NpgsqlTransaction Transaction { get; } = transaction;
 
-    public IUserLock UserLock => throw NotYet("user lock", "T-3.6");
+    public IUserLock UserLock => _userLock ??= new UserLock(Connection, Transaction);
 
-    public IReservationRepository Reservations => throw NotYet("reservation repository", "T-3.6");
+    public IReservationRepository Reservations => _reservations ??= new ReservationRepository(Connection, Transaction);
 
-    public ISeatRepository Seats => throw NotYet("seat repository", "T-3.6");
+    public ISeatRepository Seats => _seats ??= new SeatRepository(Connection, Transaction);
 
     public IShowRepository Shows => _shows ??= new ShowRepository(Connection, Transaction);
 
@@ -33,7 +35,4 @@ public sealed class PgUnitOfWork(NpgsqlConnection connection, NpgsqlTransaction 
         command.Parameters.AddWithValue("value", $"{(long)timeout.TotalMilliseconds}ms");
         await command.ExecuteNonQueryAsync(ct);
     }
-
-    private static NotSupportedException NotYet(string what, string task) =>
-        new($"The {what} is implemented in {task}.");
 }

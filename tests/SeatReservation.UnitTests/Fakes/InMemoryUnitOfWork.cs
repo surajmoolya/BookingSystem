@@ -42,6 +42,9 @@ public sealed class InMemoryUnitOfWork : IUnitOfWork
     /// <summary>When set, the next <c>Reservations.InsertAsync</c> throws it once (e.g. a lost idempotency race).</summary>
     public Exception? NextInsertFailure { get; set; }
 
+    /// <summary>When set, <c>Seats.ConfirmAsync</c> reports this row count instead of the real one (simulates lost locks).</summary>
+    public int? ConfirmResultOverride { get; set; }
+
     public TimeSpan? LastLockTimeout { get; private set; }
 
     public IReadOnlyDictionary<(Guid ShowId, string Label), SeatRow> SeatRows => _seats;
@@ -191,7 +194,7 @@ public sealed class InMemoryUnitOfWork : IUnitOfWork
                 }
             }
 
-            return Task.FromResult(updated);
+            return Task.FromResult(db.ConfirmResultOverride ?? updated);
         }
 
         public Task<int> ReleaseByReservationAsync(Guid reservationId, CancellationToken ct)

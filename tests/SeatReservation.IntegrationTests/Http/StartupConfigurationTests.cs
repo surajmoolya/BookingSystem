@@ -52,6 +52,16 @@ public sealed class StartupConfigurationTests : IAsyncLifetime
         Assert.Equal(12, overridden.Services.GetRequiredService<IOptions<DatabaseOptions>>().Value.MaxPoolSize);
     }
 
+    [Fact]
+    public async Task Reservation_lock_timeout_follows_Database_LockTimeoutMs()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(10), _factory.Services.GetRequiredService<IOptions<ReservationOptions>>().Value.LockTimeout);
+
+        await using var overridden = new ApiFactory(ApiFactory.UnreachableConnectionString, new Dictionary<string, string?> { ["Database:LockTimeoutMs"] = "2500" });
+
+        Assert.Equal(TimeSpan.FromMilliseconds(2500), overridden.Services.GetRequiredService<IOptions<ReservationOptions>>().Value.LockTimeout);
+    }
+
     [Theory]
     [InlineData("Database:MaxPoolSize", "0", "Database:MaxPoolSize")]                     // Infrastructure
     [InlineData("Reservations:DefaultPerUserLimit", "500", "Reservations:DefaultPerUserLimit")] // Application

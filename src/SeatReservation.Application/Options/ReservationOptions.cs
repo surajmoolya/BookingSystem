@@ -11,6 +11,12 @@ public sealed class ReservationOptions
 
     /// <summary>Sanity bound on seats in one reserve request; above it the request is a 400.</summary>
     public int MaxSeatsPerRequest { get; set; } = 20;
+
+    /// <summary>
+    /// Transaction-local <c>lock_timeout</c> for reserve and cancel. Not a key of this section: the composition root copies
+    /// it from <c>Database:LockTimeoutMs</c>, which stays the one place to configure and validate it (D-095).
+    /// </summary>
+    public TimeSpan LockTimeout { get; set; } = TimeSpan.FromSeconds(10);
 }
 
 public sealed class ReservationOptionsValidator : IValidateOptions<ReservationOptions>

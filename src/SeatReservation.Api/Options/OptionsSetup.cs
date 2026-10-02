@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using SeatReservation.Application.Options;
+using SeatReservation.Infrastructure.Persistence;
 
 namespace SeatReservation.Api.Options;
 
@@ -19,7 +20,10 @@ public static class OptionsSetup
         services.AddValidated<ShutdownOptions, ShutdownOptionsValidator>(configuration, ShutdownOptions.SectionName);
 
         // Validators for these two come from AddApplication().
-        services.AddOptions<ReservationOptions>().Bind(configuration.GetSection(ReservationOptions.SectionName)).ValidateOnStart();
+        services.AddOptions<ReservationOptions>()
+            .Bind(configuration.GetSection(ReservationOptions.SectionName))
+            .PostConfigure<IOptions<DatabaseOptions>>((o, db) => o.LockTimeout = TimeSpan.FromMilliseconds(db.Value.LockTimeoutMs))
+            .ValidateOnStart();
         services.AddOptions<ShowOptions>().Bind(configuration.GetSection(ShowOptions.SectionName)).ValidateOnStart();
 
         return services;

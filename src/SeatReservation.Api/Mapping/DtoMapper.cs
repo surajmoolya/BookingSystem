@@ -1,5 +1,6 @@
 using SeatReservation.Api.Contracts.Requests;
 using SeatReservation.Api.Contracts.Responses;
+using SeatReservation.Application.Reservations;
 using SeatReservation.Application.Shows;
 
 namespace SeatReservation.Api.Mapping;
@@ -36,4 +37,15 @@ public static class DtoMapper
         new SeatCountsResponse(snapshot.Counts.Total, snapshot.Counts.Available, snapshot.Counts.Held, snapshot.Counts.Confirmed),
         snapshot.Seats.Select(s => new SeatResponse(s.Label, s.Status)).ToArray(),
         snapshot.AsOf.UtcDateTime);   // UTC DateTime serialises with a trailing "Z"
+
+    public static ReservationResponse ToResponse(Reservation r) => new(
+        r.Id,
+        r.ShowId,
+        r.UserId,
+        r.Seats,
+        r.AmountPaise,
+        r.Status,
+        r.IdempotencyKey,
+        r.CreatedAt.UtcDateTime,
+        r.CancelledAt?.UtcDateTime);
 }

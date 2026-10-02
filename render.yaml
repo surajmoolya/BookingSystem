@@ -1,0 +1,28 @@
+# Render Blueprint: one Docker web service + Render Postgres 16, both in the same region so the
+# service reaches the database over Render's private network (internal URL, no TLS needed).
+databases:
+  - name: seatres-db
+    databaseName: seatres
+    user: seatres
+    plan: free                   # D-091: free tier for now (expires 30 days after creation)
+    region: singapore
+    postgresMajorVersion: "16"
+    ipAllowList: []              # internal connections only; no public access to the database
+
+services:
+  - type: web
+    name: seatres-api
+    runtime: docker
+    plan: free                   # D-091; D-088 recommends standard for the evaluation burst
+    region: singapore
+    numInstances: 1              # D-086: one instance, so per-process counters reconcile with the API
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health/ready
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase: { name: seatres-db, property: connectionString }
+      - key: Auth__SigningKey
+        generateValue: true
+      - key: Database__MaxPoolSize
+        value: "40"

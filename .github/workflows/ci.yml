@@ -34,3 +34,6 @@ jobs:
 
       - name: Integration tests (Testcontainers)
         run: dotnet test tests/SeatReservation.IntegrationTests -c Release --no-build --filter "Category!=Load"
+
+      - name: Docker image
+        run: docker build -t seatres-api:ci .

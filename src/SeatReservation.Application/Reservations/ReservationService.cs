@@ -100,11 +100,6 @@ public sealed class ReservationService(
         }
     }
 
-    // Postgres keeps timestamps to the microsecond. Stamping at that precision makes the 201 body and a later replay
-    // (read back from the database) show the same created_at (D-096).
-    private static DateTimeOffset TruncateToMicroseconds(DateTimeOffset value) =>
-        new(value.Ticks - (value.Ticks % (TimeSpan.TicksPerMillisecond / 1000)), value.Offset);
-
     // Same user, same key: the same request is a replay, anything else reuses the key and is a conflict (D-031, D-033).
     private static ReservationOutcome ReplayOrConflict(Reservation prior, byte[] hash) =>
         prior.RequestHash.AsSpan().SequenceEqual(hash)
@@ -156,7 +151,7 @@ public sealed class ReservationService(
             hash,
             sorted,
             checked(show.PricePaise * sorted.Length),
-            TruncateToMicroseconds(clock.UtcNow));
+            Timestamps.TruncateToMicroseconds(clock.UtcNow));
         await uow.Reservations.InsertAsync(reservation, ct);
 
         // Every seat was locked and available, so anything but a full update means the locks didn't hold.

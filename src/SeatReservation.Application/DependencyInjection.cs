@@ -25,6 +25,7 @@ public static class DependencyInjection
         services.TryAddSingleton<IReservationMetrics, NullReservationMetrics>();
 
         services.TryAddSingleton<AuthService>();
+        services.TryAddSingleton<CancellationService>();
         services.TryAddSingleton<CreateShowValidator>();
         services.TryAddSingleton<ReserveSeatsValidator>();
         services.TryAddSingleton<ReservationService>();

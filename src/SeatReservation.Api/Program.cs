@@ -64,7 +64,7 @@ app.MapControllers();
 app.MapHealthEndpoints();
 app.MapHostMetrics();
 
-app.Run();
+return app.RunOrExplain();   // invalid configuration → one startup.config_invalid line and exit code 1
 
 // Exposed for WebApplicationFactory<Program> in the integration tests.
 public partial class Program

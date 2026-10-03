@@ -8,6 +8,9 @@ public sealed class AuthOptions
 {
     public const string SectionName = "Auth";
 
+    /// <summary>The key committed in <c>appsettings.Development.json</c>; it's public, so it's refused in every other environment.</summary>
+    public const string DevelopmentSigningKey = "dev-only-signing-key-do-not-use-in-production-0123456789";
+
     /// <summary>HS256 signing key, at least 32 bytes. Required outside Development; there a missing key means a random per-process one.</summary>
     public string SigningKey { get; set; } = "";
 
@@ -36,6 +39,10 @@ public sealed class AuthOptionsValidator(IHostEnvironment environment) : IValida
             {
                 failures.Add($"{AuthOptions.SectionName}:{nameof(options.SigningKey)} is required outside Development.");
             }
+        }
+        else if (options.SigningKey == AuthOptions.DevelopmentSigningKey && !environment.IsDevelopment())
+        {
+            failures.Add($"{AuthOptions.SectionName}:{nameof(options.SigningKey)} is the public Development key; set a secret one outside Development.");
         }
         else if (Encoding.UTF8.GetByteCount(options.SigningKey) < MinSigningKeyBytes)
         {

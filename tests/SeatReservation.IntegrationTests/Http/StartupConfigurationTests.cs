@@ -1,9 +1,11 @@
 using System.Net;
+using System.Text.Json;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using SeatReservation.Api.Hosting;
 using SeatReservation.Api.Options;
 using SeatReservation.Application;
@@ -137,5 +139,75 @@ public sealed class StartupConfigurationTests : IAsyncLifetime
             await host.StartAsync();
             await host.StopAsync();
         }
+    }
+
+    [Theory]
+    [InlineData("Production", true)]
+    [InlineData("Development", false)]
+    public async Task Committed_development_key_is_refused_outside_Development(string environment, bool shouldFail)
+    {
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true, EnvironmentName = environment });
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Auth:SigningKey"] = AuthOptions.DevelopmentSigningKey,
+        });
+        builder.Services.AddValidatedOptions(builder.Configuration);
+        using var host = builder.Build();
+
+        if (shouldFail)
+        {
+            var ex = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
+            Assert.Contains("Auth:SigningKey is the public Development key", ex.Message);
+        }
+        else
+        {
+            await host.StartAsync();
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Development_key_constant_matches_appsettings_Development()
+    {
+        await using var stream = File.OpenRead(Path.Combine(AppContext.BaseDirectory, "appsettings.Development.json"));
+        using var json = await JsonDocument.ParseAsync(stream);
+
+        Assert.Equal(AuthOptions.DevelopmentSigningKey, json.RootElement.GetProperty("Auth").GetProperty("SigningKey").GetString());
+    }
+
+    [Fact]
+    public void Startup_failure_is_one_json_line_naming_every_failure()
+    {
+        var ex = new OptionsValidationException("", typeof(AuthOptions), ["Auth:SigningKey is required outside Development."]);
+        using var output = new StringWriter();
+
+        StartupFailure.Write(ex, "Production", output);
+
+        var line = Assert.Single(output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries));
+        using var json = JsonDocument.Parse(line);
+        Assert.Equal("Fatal", json.RootElement.GetProperty("@l").GetString());
+        Assert.Equal(StartupFailure.EventName, json.RootElement.GetProperty("EventName").GetString());
+        Assert.Equal("AuthOptions", json.RootElement.GetProperty("OptionsType").GetString());
+        Assert.Equal("Auth:SigningKey is required outside Development.", json.RootElement.GetProperty("Failures")[0].GetString());
+    }
+
+    [Theory]
+    [InlineData("Production", false)]
+    [InlineData("Development", true)]
+    public void Error_detail_is_included_only_in_Development(string environment, bool expected)
+    {
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true, EnvironmentName = environment });
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            // Asking for it in the connection string must not switch it on in production.
+            ["ConnectionStrings:Postgres"] = "Host=127.0.0.1;Port=1;Database=x;Username=x;Password=x;Include Error Detail=true",
+        });
+        builder.Services.AddInfrastructure(builder.Configuration);
+        using var host = builder.Build();
+
+        var pools = host.Services.GetRequiredService<DataSources>();
+
+        Assert.Equal(expected, new NpgsqlConnectionStringBuilder(pools.Main.ConnectionString).IncludeErrorDetail);
+        Assert.Equal(expected, new NpgsqlConnectionStringBuilder(pools.Ops.ConnectionString).IncludeErrorDetail);
     }
 }

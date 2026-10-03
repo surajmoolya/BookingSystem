@@ -31,6 +31,7 @@ public static class HttpMetricsSetup
         DotNetStats.Register(registry);
         services.AddSingleton(registry);
         services.AddSingleton<IMetricFactory>(Metrics.WithCustomRegistry(registry));
+        services.AddSingleton<SeatGaugeCollector>();
         return services;
     }
 
@@ -56,8 +57,14 @@ public static class HttpMetricsSetup
         });
     }
 
-    /// <summary>Maps <c>GET /metrics</c> onto the host's registry. Anonymous, outside any rate limit.</summary>
-    public static IEndpointConventionBuilder MapHostMetrics(this IEndpointRouteBuilder endpoints) =>
-        endpoints.MapMetrics("/metrics", endpoints.ServiceProvider.GetRequiredService<CollectorRegistry>())
+    /// <summary>
+    /// Maps <c>GET /metrics</c> onto the host's registry (anonymous, outside any rate limit), and creates the seat gauge
+    /// collector, whose constructor hooks its refresh into every scrape.
+    /// </summary>
+    public static IEndpointConventionBuilder MapHostMetrics(this IEndpointRouteBuilder endpoints)
+    {
+        _ = endpoints.ServiceProvider.GetRequiredService<SeatGaugeCollector>();
+        return endpoints.MapMetrics("/metrics", endpoints.ServiceProvider.GetRequiredService<CollectorRegistry>())
             .AllowAnonymous();
+    }
 }

@@ -1,7 +1,10 @@
 using System.Diagnostics;
 using System.Net;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 using Npgsql;
+using SeatReservation.Infrastructure.Health;
 using SeatReservation.Infrastructure.Migrations;
 using SeatReservation.IntegrationTests.Infrastructure;
 
@@ -14,6 +17,17 @@ namespace SeatReservation.IntegrationTests.Http;
 [Collection(PostgresCollection.Name)]
 public sealed class HealthApiTests(PostgresFixture postgres)
 {
+    [Fact]
+    public void Database_and_migrations_checks_are_registered_with_the_ready_tag()
+    {
+        using var factory = new ApiFactory(ApiFactory.UnreachableConnectionString);
+
+        var registrations = factory.Services.GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations;
+
+        Assert.Equal(
+            [DatabaseHealthCheck.Name, MigrationsHealthCheck.Name],
+            registrations.Where(r => r.Tags.Contains("ready")).Select(r => r.Name).Order());
+    }
     [Fact]
     public async Task Ready_200_with_db()
     {

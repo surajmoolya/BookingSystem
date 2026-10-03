@@ -25,6 +25,7 @@ public static class LoggingSetup
             .ReadFrom.Configuration(context.Configuration)
             .ReadFrom.Services(services)
             .Enrich.FromLogContext()
+            .Enrich.With<EventNameEnricher>()
             .Enrich.WithProperty("App", AppName)
             .Enrich.WithProperty("Env", context.HostingEnvironment.EnvironmentName)
             .Enrich.WithProperty("MachineName", Environment.MachineName)

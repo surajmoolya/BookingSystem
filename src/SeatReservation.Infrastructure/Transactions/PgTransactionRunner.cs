@@ -37,7 +37,7 @@ public sealed class PgTransactionRunner(DataSources dataSources, DbMetrics metri
                 {
                     case DbErrorKind.Transient or DbErrorKind.Unavailable when attempt < AttemptLimit(ex):
                         metrics.Retried(operation);
-                        logger.LogWarning("db.retry operation={Operation} attempt={Attempt} error={Error}", operation, attempt, Describe(ex));
+                        logger.LogWarning("db.retry operation={Operation} attempt={Attempt} sql_state={SqlState} error={Error}", operation, attempt, SqlState(ex), Describe(ex));
                         await Task.Delay(Backoff(attempt), ct);
                         continue;
 
@@ -83,6 +83,8 @@ public sealed class PgTransactionRunner(DataSources dataSources, DbMetrics metri
 
     private static TimeSpan Backoff(int attempt) =>
         TimeSpan.FromMilliseconds(20 * Math.Pow(2, attempt - 1) + Random.Shared.Next(0, 20));
+
+    private static string? SqlState(Exception ex) => (ex as PostgresException ?? ex.InnerException as PostgresException)?.SqlState;
 
     // Type and message only: Npgsql messages never carry the password, but the full exception text could carry row data.
     private static string Describe(Exception ex) => $"{ex.GetType().Name}: {ex.Message}";

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using SeatReservation.Application.Exceptions;
+using SeatReservation.Application.Logging;
 using SeatReservation.Application.Options;
 using SeatReservation.Application.Reservations;
 using SeatReservation.Application.Shows;
@@ -671,6 +672,35 @@ public class ReservationServiceTests
         Assert.DoesNotContain(_logger.Entries, e => e.Message.Contains(key));
         var attempt = _logger.Entries.First(e => e.Message.StartsWith("reservation.attempt")).Message;
         Assert.Contains($"idempotency_key_hash={RequestHasherTests.Sha256Prefix(key)}", attempt);
+    }
+
+    [Fact]
+    public async Task Events_carry_their_event_name_and_structured_properties()
+    {
+        var r = Assert.IsType<ReservationOutcome.Created>(await ReserveAsync(Command("A1", "A2"))).Reservation;
+
+        Assert.Equal([LogEvents.ReservationAttemptName, LogEvents.ReservationConfirmedName], _logger.Structured.Select(s => s.EventName));
+        var attempt = _logger.Structured[0].Properties;
+        Assert.Equal("alice", attempt["UserId"]);
+        Assert.Equal(2, attempt["SeatCount"]);
+        Assert.Matches("^[0-9a-f]{8}$", (string)attempt["IdempotencyKeyHash"]!);
+        Assert.DoesNotContain(attempt.Values, v => v is string s && s.Contains("key-1", StringComparison.Ordinal));
+
+        var confirmed = _logger.Structured[1].Properties;
+        Assert.Equal(r.Id, confirmed["ReservationId"]);
+        Assert.Equal(ShowId, confirmed["ShowId"]);
+        Assert.Equal(50_000L, confirmed["AmountPaise"]);
+    }
+
+    [Fact]
+    public async Task A_decline_is_named_reservation_declined_with_its_reason()
+    {
+        _db.SetSeat(ShowId, "A1", SeatStatus.Confirmed, "bob", SequentialIdGenerator.IdFor(50));
+
+        await ReserveAsync(Command("A1"));
+
+        var declined = Assert.Single(_logger.Structured, s => s.EventName == LogEvents.ReservationDeclinedName);
+        Assert.Equal(DeclineReason.SeatTaken, declined.Properties["Reason"]);
     }
 
     // ---- owner-only lookup ----

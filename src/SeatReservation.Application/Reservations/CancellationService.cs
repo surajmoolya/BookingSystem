@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SeatReservation.Application.Abstractions;
 using SeatReservation.Application.Exceptions;
+using SeatReservation.Application.Logging;
 using SeatReservation.Application.Options;
 
 namespace SeatReservation.Application.Reservations;
@@ -32,9 +33,7 @@ public sealed class CancellationService(
         {
             var r = cancelled.Reservation;
             metrics.Cancelled();
-            logger.LogInformation(
-                "reservation.cancelled reservation_id={ReservationId} user_id={UserId} show_id={ShowId} seats={Seats}",
-                r.Id, r.UserId, r.ShowId, r.Seats);
+            logger.ReservationCancelled(r.Id, r.UserId, r.ShowId, r.Seats);
         }
 
         return outcome;

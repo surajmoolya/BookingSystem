@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SeatReservation.Application.Abstractions;
 using SeatReservation.Application.Exceptions;
+using SeatReservation.Application.Logging;
 using SeatReservation.Application.Options;
 
 namespace SeatReservation.Application.Shows;
@@ -49,7 +50,7 @@ public sealed class ShowService(
         }, ct);
 
         catalog.Add(ShowDefinition.Create(show, labels));
-        logger.LogInformation("show.created show_id={ShowId} seats={Seats} per_user_limit={PerUserLimit}", show.Id, show.TotalSeats, show.PerUserLimit);
+        logger.ShowCreated(show.Id, show.TotalSeats, show.PerUserLimit);
 
         var seats = labels.Select(l => new SeatState(l, SeatStatus.Available)).ToArray();
         var counts = new SeatCounts(Total: seats.Length, Available: seats.Length, Held: 0, Confirmed: 0);
@@ -90,9 +91,7 @@ public sealed class ShowService(
         var counts = new SeatCounts(Total: seats.Count, Available: available, Held: held, Confirmed: confirmed);
         if (available + held + confirmed != counts.Total || counts.Total != definition.Show.TotalSeats)
         {
-            logger.LogError(
-                "invariant.violation show_id={ShowId} total={Total} available={Available} held={Held} confirmed={Confirmed} expected_total={ExpectedTotal}",
-                showId, counts.Total, available, held, confirmed, definition.Show.TotalSeats);
+            logger.InvariantViolation(showId, counts.Total, available, held, confirmed, definition.Show.TotalSeats);
         }
 
         return new GetShowOutcome.Found(new ShowSnapshot(definition.Show, counts, seats, asOf));

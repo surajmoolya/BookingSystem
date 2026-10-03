@@ -104,6 +104,23 @@ public class RequestLoggingTests(LoggingFixture api) : IClassFixture<LoggingFixt
         }
     }
 
+    [Fact]
+    public async Task Domain_and_repository_events_get_an_event_name_and_the_request_correlation_id()
+    {
+        var showId = await CreateShowAsync(api.Client, Labels(1));
+        var created = await ReserveAsync(api.Client, showId, _alice, ["S1"], "k1");
+        var request = await SingleRequestEventAsync(e => CapturingSink.Scalar(e, "UserId") == _alice);
+
+        var confirmed = Assert.Single(api.Sink.Events, e =>
+            CapturingSink.Scalar(e, "EventName") == "reservation.confirmed" && CapturingSink.Scalar(e, "UserId") == _alice);
+        Assert.Equal(created.ReservationId.ToString(), CapturingSink.Scalar(confirmed, "ReservationId"));
+        Assert.Equal(CapturingSink.Scalar(request, "CorrelationId"), CapturingSink.Scalar(confirmed, "CorrelationId"));
+        Assert.NotNull(CapturingSink.Scalar(confirmed, "CorrelationId"));
+
+        // The repository layer's plain templates are named from their leading token (migrations ran when the host started).
+        Assert.Contains(api.Sink.Events, e => CapturingSink.Scalar(e, "EventName") == "migrations.ready");
+    }
+
     private async Task<LogEvent> SingleRequestEventAsync(Func<LogEvent, bool> match)
     {
         await Eventually(() => api.Sink.RequestEvents().Any(match));

@@ -266,6 +266,8 @@ public sealed class Scenarios(ServiceClient client, BurstOptions options)
         {
             minted,
             $"reservations: {reservations.Length}, seats confirmed: {wonSeats.Length} of {labels.Length}, users at the limit: {perUser.Count(u => u.Seats == PerUserLimit)}",
+            $"ownership: {doubled.Length} seats in two reservations, max seats per user {perUser.Select(u => u.Seats).DefaultIfEmpty(0).Max()} (limit {PerUserLimit}), " +
+                $"confirmed {confirmedLabels.Count} {(confirmedLabels.SetEquals(wonSeats) ? "==" : "!=")} won {wonSeats.Distinct().Count()}",
             $"reconciliation: {show.Available}+{show.Held}+{show.Confirmed} == {show.Total}",
             $"show {showId}",
         };

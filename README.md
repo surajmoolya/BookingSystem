@@ -6,6 +6,7 @@ metrics that reconcile with the API.
 
 - **Live:** https://seatres-api.onrender.com (Render, region singapore, one instance)
 - **Design write-up:** [WRITEUP.md](WRITEUP.md)
+- **Definition-of-done audit:** [docs/definition-of-done.md](docs/definition-of-done.md)
 
 ## Contents
 

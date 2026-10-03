@@ -1,14 +1,17 @@
 using System.Net;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using SeatReservation.Api.Hosting;
 using SeatReservation.Api.Options;
 using SeatReservation.Application;
 using SeatReservation.Application.Options;
 using SeatReservation.Infrastructure;
 using SeatReservation.Infrastructure.Persistence;
 using SeatReservation.IntegrationTests.Infrastructure;
+using Serilog.Core;
 
 namespace SeatReservation.IntegrationTests.Http;
 
@@ -29,6 +32,25 @@ public sealed class StartupConfigurationTests : IAsyncLifetime
         using var response = await client.GetAsync("/health/live");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Runtime_tuning_is_applied_and_logged_at_startup()
+    {
+        var sink = new CapturingSink();
+        await using var factory = new ApiFactory(ApiFactory.UnreachableConnectionString, configureServices: s => s.AddSingleton<ILogEventSink>(sink));
+        using var client = factory.CreateClient();   // starts the host
+
+        ThreadPool.GetMinThreads(out var worker, out var io);
+        Assert.True(worker >= RuntimeTuning.MinThreads && io >= RuntimeTuning.MinThreads, $"min threads {worker}/{io}");
+        var kestrel = factory.Services.GetRequiredService<IOptions<KestrelServerOptions>>().Value;
+        Assert.Equal(64 * 1024, kestrel.Limits.MaxRequestBodySize);
+        Assert.False(kestrel.AddServerHeader);
+
+        var line = Assert.Single(sink.Events, e => e.MessageTemplate.Text.StartsWith("runtime.tuned", StringComparison.Ordinal));
+        Assert.Equal("65536", CapturingSink.Scalar(line, "MaxRequestBodyBytes"));
+        Assert.Equal("False", CapturingSink.Scalar(line, "ServerHeader"));
+        Assert.True(int.Parse(CapturingSink.Scalar(line, "MinWorkerThreads")!) >= RuntimeTuning.MinThreads);
     }
 
     [Fact]

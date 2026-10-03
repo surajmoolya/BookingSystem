@@ -3,6 +3,7 @@ using SeatReservation.Api.Admission;
 using SeatReservation.Api.Auth;
 using SeatReservation.Api.Errors;
 using SeatReservation.Api.Health;
+using SeatReservation.Api.Hosting;
 using SeatReservation.Api.Json;
 using SeatReservation.Api.Observability;
 using SeatReservation.Api.Options;
@@ -24,6 +25,7 @@ else if (string.IsNullOrWhiteSpace(builder.Configuration["urls"]))
     builder.WebHost.UseUrls("http://0.0.0.0:8080");
 }
 
+builder.AddRuntimeTuning();
 builder.AddStructuredLogging();
 
 builder.Services.AddControllers()
@@ -48,6 +50,7 @@ builder.Services.AddAdmissionControl();
 builder.Services.AddHostedService<ShutdownDrain>();
 
 var app = builder.Build();
+app.LogRuntimeTuning();
 
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseRequestCompletionLogging();

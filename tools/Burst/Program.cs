@@ -1,6 +1,7 @@
 // Burst: concurrent load and correctness checker for the seat reservation service (lld §12).
 // T-3.15 builds the minimum for the first remote check (hot seat + mixed storm); M7 adds the remaining scenarios.
 
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using Burst;
 
@@ -67,23 +68,7 @@ Report.Totals(results);
 
 if (options.JsonPath is { } path)
 {
-    var report = new
-    {
-        target = options.BaseUrl.ToString(),
-        at = DateTimeOffset.UtcNow,
-        pass = results.All(r => r.Pass),
-        scenarios = results.Select(r => new
-        {
-            name = r.Name,
-            pass = r.Pass,
-            failures = r.Failures,
-            requests = r.Outcomes.Length,
-            elapsed_seconds = r.Elapsed.TotalSeconds,
-            buckets = Report.Buckets(r.Outcomes).ToDictionary(b => b.Bucket, b => b.Count),
-            latency_ms = Report.Latency(r.Outcomes),
-        }),
-    };
-    await File.WriteAllTextAsync(path, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+    await File.WriteAllTextAsync(path, JsonSerializer.Serialize(Report.Json(options.BaseUrl, results), new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
 }
 
 return results.All(r => r.Pass) ? 0 : 1;

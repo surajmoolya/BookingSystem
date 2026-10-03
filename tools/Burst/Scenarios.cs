@@ -149,5 +149,5 @@ public sealed class Scenarios(ServiceClient client, BurstOptions options)
     }
 
     private static string Describe(IEnumerable<Outcome> outcomes) =>
-        string.Join(", ", Report.Buckets(outcomes).Select(b => $"{b.Bucket}×{b.Count}"));
+        string.Join(", ", Stats.Buckets(outcomes).Select(b => $"{b.Bucket}×{b.Count}"));
 }

@@ -3,23 +3,26 @@ namespace Burst;
 public sealed record ScenarioResult(string Name, string Title, Outcome[] Outcomes, List<string> Failures, TimeSpan Elapsed)
 {
     public bool Pass => Failures.Count == 0;
+
+    public double RequestsPerSecond => Outcomes.Length / Math.Max(Elapsed.TotalSeconds, 0.001);
 }
 
-/// <summary>Console report in the lld §12 layout.</summary>
+/// <summary>Console and JSON report in the lld §12 layout; every number comes from <see cref="Stats"/>.</summary>
 public static class Report
 {
     public static void Scenario(ScenarioResult result, IEnumerable<string> extraLines)
     {
+        var counts = Stats.Count(result.Outcomes);
         Console.WriteLine($"== {result.Title} ".PadRight(72, '='));
-        foreach (var (bucket, count) in Buckets(result.Outcomes))
+        foreach (var (bucket, count) in Stats.Buckets(result.Outcomes))
         {
             Line(bucket, count.ToString());
         }
 
-        Line("5xx", result.Outcomes.Count(o => o.Is5xx).ToString());
-        Line("transport errors", result.Outcomes.Count(o => o.IsTransportError).ToString());
-        Line("latency p50/p95/p99", Latency(result.Outcomes));
-        Line("wall time", $"{result.Elapsed.TotalSeconds:0.0}s ({result.Outcomes.Length / Math.Max(result.Elapsed.TotalSeconds, 0.001):0} req/s)");
+        Line("5xx", counts[OutcomeClass.ServerError].ToString());
+        Line("transport errors", counts[OutcomeClass.TransportError].ToString());
+        Line("latency p50/p95/p99", Stats.Latency(result.Outcomes).ToString());
+        Line("wall time", $"{result.Elapsed.TotalSeconds:0.0}s ({result.RequestsPerSecond:0} req/s)");
         foreach (var line in extraLines)
         {
             Console.WriteLine($"  {line}");
@@ -37,33 +40,44 @@ public static class Report
     public static void Totals(IReadOnlyList<ScenarioResult> results)
     {
         var all = results.SelectMany(r => r.Outcomes).ToArray();
+        var counts = Stats.Count(all);
+        string Pair(OutcomeClass c) => $"{Stats.Name(c)}: {counts[c]}";
+
         Console.WriteLine("== TOTALS ".PadRight(72, '='));
-        Console.WriteLine(
-            $"confirmed: {Count(all, o => o.Status == 201)}   seat_taken: {Count(all, o => o.Code == "seat_taken")}   " +
-            $"per_user_limit: {Count(all, o => o.Code == "per_user_limit")}   idempotent_replay: {Count(all, o => o.Status == 200 && o.Replayed)}");
-        Console.WriteLine(
-            $"idempotency_key_conflict: {Count(all, o => o.Code == "idempotency_key_conflict")}   " +
-            $"other_4xx: {Count(all, o => o.Status is >= 400 and < 500 && o.Code is not ("seat_taken" or "per_user_limit" or "idempotency_key_conflict"))}   " +
-            $"5xx: {Count(all, o => o.Is5xx)}   transport_errors: {Count(all, o => o.IsTransportError)}");
-        Console.WriteLine($"latency p50/p95/p99 (all requests): {Latency(all)}");
+        Console.WriteLine(string.Join("   ", new[] { OutcomeClass.Confirmed, OutcomeClass.SeatTaken, OutcomeClass.PerUserLimit, OutcomeClass.Replayed }.Select(Pair)));
+        Console.WriteLine(string.Join("   ", new[] { OutcomeClass.KeyConflict, OutcomeClass.Other2xx, OutcomeClass.Other4xx, OutcomeClass.ServerError, OutcomeClass.TransportError }.Select(Pair)));
+        Console.WriteLine($"requests: {all.Length}   latency p50/p95/p99 (all requests): {Stats.Latency(all)}");
         Console.WriteLine($"OVERALL: {(results.All(r => r.Pass) ? "PASS" : "FAIL")}");
     }
 
-    public static IEnumerable<(string Bucket, int Count)> Buckets(IEnumerable<Outcome> outcomes) =>
-        outcomes.GroupBy(o => o.Bucket).OrderBy(g => g.Key, StringComparer.Ordinal).Select(g => (g.Key, g.Count()));
-
-    /// <summary>Over every response that came back, declines included: that's what a client experiences.</summary>
-    public static string Latency(IReadOnlyCollection<Outcome> outcomes)
+    /// <summary>The <c>--json</c> report: the same numbers as the console, keyed by the same snake_case names.</summary>
+    public static object Json(Uri target, IReadOnlyList<ScenarioResult> results)
     {
-        var sorted = outcomes.Where(o => !o.IsTransportError).Select(o => o.LatencyMs).Order().ToArray();
-        return sorted.Length == 0
-            ? "n/a"
-            : $"{Percentile(sorted, 0.50):0}ms / {Percentile(sorted, 0.95):0}ms / {Percentile(sorted, 0.99):0}ms";
+        var all = results.SelectMany(r => r.Outcomes).ToArray();
+        return new
+        {
+            target = target.ToString(),
+            at = DateTimeOffset.UtcNow,
+            pass = results.All(r => r.Pass),
+            totals = new { requests = all.Length, counts = Counts(all), latency_ms = Stats.Latency(all) },
+            scenarios = results.Select(r => new
+            {
+                name = r.Name,
+                title = r.Title,
+                pass = r.Pass,
+                failures = r.Failures,
+                requests = r.Outcomes.Length,
+                elapsed_seconds = r.Elapsed.TotalSeconds,
+                requests_per_second = r.RequestsPerSecond,
+                counts = Counts(r.Outcomes),
+                buckets = Stats.Buckets(r.Outcomes).ToDictionary(b => b.Bucket, b => b.Count),
+                latency_ms = Stats.Latency(r.Outcomes),
+            }),
+        };
     }
 
-    public static double Percentile(double[] sorted, double p) => sorted[Math.Clamp((int)Math.Ceiling(p * sorted.Length) - 1, 0, sorted.Length - 1)];
-
-    private static int Count(IEnumerable<Outcome> outcomes, Func<Outcome, bool> predicate) => outcomes.Count(predicate);
+    private static Dictionary<string, int> Counts(IEnumerable<Outcome> outcomes) =>
+        Stats.Count(outcomes).ToDictionary(kv => Stats.Name(kv.Key), kv => kv.Value);
 
     private static void Line(string label, string value) => Console.WriteLine($"  {(label + " ").PadRight(22, '.')} {value}");
 }

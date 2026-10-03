@@ -1,0 +1,322 @@
+{
+  "target": "https://seatres-api.onrender.com/",
+  "at": "2026-10-03T06:23:06.0151762+00:00",
+  "pass": false,
+  "zero_5xx_gate": false,
+  "totals": {
+    "requests": 21005,
+    "counts": {
+      "confirmed": 830,
+      "idempotent_replay": 330,
+      "seat_taken": 4935,
+      "per_user_limit": 98,
+      "idempotency_key_conflict": 100,
+      "not_owner": 1,
+      "cancelled": 2,
+      "other_2xx": 0,
+      "other_4xx": 0,
+      "5xx": 1,
+      "transport_errors": 14708
+    },
+    "latency_ms": {
+      "count": 6297,
+      "p50": 34153.9047,
+      "p95": 57826.8259,
+      "p99": 59428.0885,
+      "max": 60612.5725
+    }
+  },
+  "scenarios": [
+    {
+      "name": "hot",
+      "title": "hot-seat storm: 500 users -> A1",
+      "pass": true,
+      "failures": [],
+      "notes": [
+        "tokens: 500 minted in 2.5s (32 in flight, outside the timed window)",
+        "winner: b18ce72-h14 (0795283c-8257-4e3b-a06a-3dec8804bc6c)",
+        "reconciliation: 9+0+1 == 10",
+        "show ba2f4ec6-108f-4807-8236-6df47e6bded7"
+      ],
+      "requests": 500,
+      "elapsed_seconds": 7.4025363,
+      "requests_per_second": 67.54441717496205,
+      "counts": {
+        "confirmed": 1,
+        "idempotent_replay": 0,
+        "seat_taken": 499,
+        "per_user_limit": 0,
+        "idempotency_key_conflict": 0,
+        "not_owner": 0,
+        "cancelled": 0,
+        "other_2xx": 0,
+        "other_4xx": 0,
+        "5xx": 0,
+        "transport_errors": 0
+      },
+      "buckets": {
+        "201": 1,
+        "409 seat_taken": 499
+      },
+      "latency_ms": {
+        "count": 500,
+        "p50": 6054.1597,
+        "p95": 7136.8685,
+        "p99": 7333.5788,
+        "max": 7369.6375
+      }
+    },
+    {
+      "name": "idem",
+      "title": "idempotent retries: 200 × one key -> X1",
+      "pass": false,
+      "failures": [
+        "5xx responses: 502 non_json×1",
+        "every other response should be a 200 replay; got 502 non_json×1"
+      ],
+      "notes": [
+        "tokens: 1 minted in 0.1s (32 in flight, outside the timed window)",
+        "key in header/body: 100/100   reservation: eff8e48c-ad86-4c8e-be82-9087fd2c80d8",
+        "header/body mismatch probe: 400 validation",
+        "reconciliation: 2+0+1 == 3",
+        "show 476b9cfd-462f-4e6b-9ac1-61b6598b7ca5"
+      ],
+      "requests": 200,
+      "elapsed_seconds": 7.6980753,
+      "requests_per_second": 25.980520091820875,
+      "counts": {
+        "confirmed": 1,
+        "idempotent_replay": 198,
+        "seat_taken": 0,
+        "per_user_limit": 0,
+        "idempotency_key_conflict": 0,
+        "not_owner": 0,
+        "cancelled": 0,
+        "other_2xx": 0,
+        "other_4xx": 0,
+        "5xx": 1,
+        "transport_errors": 0
+      },
+      "buckets": {
+        "200": 198,
+        "201": 1,
+        "502 non_json": 1
+      },
+      "latency_ms": {
+        "count": 200,
+        "p50": 4386.1906,
+        "p95": 7271.3345,
+        "p99": 7575.7742,
+        "max": 7678.2451
+      }
+    },
+    {
+      "name": "conflict",
+      "title": "same key, different request: 200 × one key -> X | Y",
+      "pass": true,
+      "failures": [],
+      "notes": [
+        "tokens: 1 minted in 0.1s (32 in flight, outside the timed window)",
+        "winning seat: Y   reservation: eb51301f-2a73-475b-907c-d7514bcb2273",
+        "sequential reuse with [Z]: 409 idempotency_key_conflict",
+        "reconciliation: 2+0+1 == 3",
+        "show cb261c6c-e670-4d50-94b1-36efafef0075"
+      ],
+      "requests": 200,
+      "elapsed_seconds": 7.0178089,
+      "requests_per_second": 28.498923645527025,
+      "counts": {
+        "confirmed": 1,
+        "idempotent_replay": 99,
+        "seat_taken": 0,
+        "per_user_limit": 0,
+        "idempotency_key_conflict": 100,
+        "not_owner": 0,
+        "cancelled": 0,
+        "other_2xx": 0,
+        "other_4xx": 0,
+        "5xx": 0,
+        "transport_errors": 0
+      },
+      "buckets": {
+        "200": 99,
+        "201": 1,
+        "409 idempotency_key_conflict": 100
+      },
+      "latency_ms": {
+        "count": 200,
+        "p50": 3722.3632,
+        "p95": 6705.3057,
+        "p99": 6965.7964,
+        "max": 6979.7957
+      }
+    },
+    {
+      "name": "limit",
+      "title": "per-user limit: 50 seats × one user, limit 4 then 2",
+      "pass": true,
+      "failures": [],
+      "notes": [
+        "tokens: 1 minted in 0.1s (32 in flight, outside the timed window)",
+        "per_user_limit 4: 4×201, 46×409 per_user_limit, owns [L15,L29,L47,L5]   show 8d06b05d-42a5-432e-9769-3d63b89be13a",
+        "per_user_limit 2: 2×201, 48×409 per_user_limit, owns [L15,L46]   show aacddfd5-cd30-406d-b067-73dd4d4bb643"
+      ],
+      "requests": 100,
+      "elapsed_seconds": 4.6425944,
+      "requests_per_second": 21.5396804855492,
+      "counts": {
+        "confirmed": 6,
+        "idempotent_replay": 0,
+        "seat_taken": 0,
+        "per_user_limit": 94,
+        "idempotency_key_conflict": 0,
+        "not_owner": 0,
+        "cancelled": 0,
+        "other_2xx": 0,
+        "other_4xx": 0,
+        "5xx": 0,
+        "transport_errors": 0
+      },
+      "buckets": {
+        "201": 6,
+        "409 per_user_limit": 94
+      },
+      "latency_ms": {
+        "count": 100,
+        "p50": 1392.5142,
+        "p95": 2894.1013,
+        "p99": 2997.528,
+        "max": 2997.7081
+      }
+    },
+    {
+      "name": "mixed",
+      "title": "mixed storm: 20000 requests, 5000 users, 1000 seats",
+      "pass": false,
+      "failures": [
+        "transport errors: transport timeout×14708",
+        "confirmed seats (955) differ from the seats in successful responses (951): 4 extra confirmed seats, consistent with commits by some of the 14708 timed-out requests"
+      ],
+      "notes": [
+        "tokens: 5000 minted in 21.8s (32 in flight, outside the timed window)",
+        "reservations: 819, seats confirmed: 951 of 1000, users at the limit: 7",
+        "ownership: 0 seats in two reservations, max seats per user 4 (limit 4), confirmed 955 != won 951",
+        "reconciliation: 45+0+955 == 1000",
+        "show 8f2cce11-62e2-4946-936b-5e9a5f468cc8"
+      ],
+      "requests": 20000,
+      "elapsed_seconds": 64.4214131,
+      "requests_per_second": 310.45577918252775,
+      "counts": {
+        "confirmed": 819,
+        "idempotent_replay": 33,
+        "seat_taken": 4436,
+        "per_user_limit": 4,
+        "idempotency_key_conflict": 0,
+        "not_owner": 0,
+        "cancelled": 0,
+        "other_2xx": 0,
+        "other_4xx": 0,
+        "5xx": 0,
+        "transport_errors": 14708
+      },
+      "buckets": {
+        "200": 33,
+        "201": 819,
+        "409 per_user_limit": 4,
+        "409 seat_taken": 4436,
+        "transport timeout": 14708
+      },
+      "latency_ms": {
+        "count": 5292,
+        "p50": 39201.5677,
+        "p95": 58122.5228,
+        "p99": 59525.602,
+        "max": 60612.5725
+      }
+    },
+    {
+      "name": "cancel",
+      "title": "cancel/rebook: A reserves Z, B can't cancel it, A cancels, C rebooks",
+      "pass": true,
+      "failures": [],
+      "notes": [
+        "tokens: 3 minted in 0.1s (32 in flight, outside the timed window)",
+        "A reserve 201 -> B cancel 403 not_owner -> A cancel 200 -> C reserve 201 -> A cancel again 200",
+        "Z owned by C: confirmed (2d6ddb23-f6b9-41aa-b130-f05f4f984bb4)",
+        "reconciliation: 1+0+1 == 2",
+        "show aeb743ca-92db-4b1f-b5d9-76d77f2095c2"
+      ],
+      "requests": 5,
+      "elapsed_seconds": 0.4307956,
+      "requests_per_second": 11.606432377675167,
+      "counts": {
+        "confirmed": 2,
+        "idempotent_replay": 0,
+        "seat_taken": 0,
+        "per_user_limit": 0,
+        "idempotency_key_conflict": 0,
+        "not_owner": 1,
+        "cancelled": 2,
+        "other_2xx": 0,
+        "other_4xx": 0,
+        "5xx": 0,
+        "transport_errors": 0
+      },
+      "buckets": {
+        "200": 2,
+        "201": 2,
+        "403 not_owner": 1
+      },
+      "latency_ms": {
+        "count": 5,
+        "p50": 85.3227,
+        "p95": 101.8829,
+        "p99": 101.8829,
+        "max": 101.8829
+      }
+    },
+    {
+      "name": "final",
+      "title": "final reconciliation: 7 shows, /metrics vs GET /shows/{id}",
+      "pass": true,
+      "failures": [],
+      "notes": [
+        "show_seats ba2f4ec6-108f-4807-8236-6df47e6bded7: 9/0/1 of 10   API 9/0/1 of 10   OK",
+        "show_seats 476b9cfd-462f-4e6b-9ac1-61b6598b7ca5: 2/0/1 of 3   API 2/0/1 of 3   OK",
+        "show_seats cb261c6c-e670-4d50-94b1-36efafef0075: 2/0/1 of 3   API 2/0/1 of 3   OK",
+        "show_seats 8d06b05d-42a5-432e-9769-3d63b89be13a: 46/0/4 of 50   API 46/0/4 of 50   OK",
+        "show_seats aacddfd5-cd30-406d-b067-73dd4d4bb643: 48/0/2 of 50   API 48/0/2 of 50   OK",
+        "show_seats 8f2cce11-62e2-4946-936b-5e9a5f468cc8: 44/0/956 of 1000   API 44/0/956 of 1000   OK",
+        "show_seats aeb743ca-92db-4b1f-b5d9-76d77f2095c2: 1/0/1 of 2   API 1/0/1 of 2   OK",
+        "per-show gauges vs API: 7/7 shows match",
+        "server metrics: reservations_confirmed_total=838 reservations_cancelled_total=2 seats_available=655",
+        "server declines: idempotency_key_conflict=101  idempotent_replay=333  per_user_limit=98  seat_taken=5546  show_not_found=0  unknown_seat=0  validation=0"
+      ],
+      "requests": 0,
+      "elapsed_seconds": 2.6499952,
+      "requests_per_second": 0,
+      "counts": {
+        "confirmed": 0,
+        "idempotent_replay": 0,
+        "seat_taken": 0,
+        "per_user_limit": 0,
+        "idempotency_key_conflict": 0,
+        "not_owner": 0,
+        "cancelled": 0,
+        "other_2xx": 0,
+        "other_4xx": 0,
+        "5xx": 0,
+        "transport_errors": 0
+      },
+      "buckets": {},
+      "latency_ms": {
+        "count": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      }
+    }
+  ]
+}

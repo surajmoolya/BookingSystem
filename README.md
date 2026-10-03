@@ -39,6 +39,8 @@ Integration tests start a real Postgres with Testcontainers, so Docker must be r
 The 20k-request burst (`./burst.sh https://seatres-api.onrender.com`, lld §12) was run against the live service on
 2026-10-03. Report: [docs/burst-report-2026-10-03.txt](docs/burst-report-2026-10-03.txt)
 ([JSON](docs/burst-report-2026-10-03.json)).
+Final run after all M8 changes: [docs/burst-report-final.txt](docs/burst-report-final.txt) ([JSON](docs/burst-report-final.json)):
+same picture, with 0×5xx in the 20k storm, 1 proxy `502` in the idempotency scenario and 14,708 client timeouts.
 
 **Correctness holds under load:**
 - The hot-seat storm (500 users, one seat) produced exactly one `201`.

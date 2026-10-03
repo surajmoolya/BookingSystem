@@ -1,0 +1,119 @@
+target https://seatres-api.onrender.com/  scenarios hot,idem,conflict,limit,mixed,cancel  timeout 60s  max-connections 1000  http2 False  key-in mixed
+service ready
+
+== hot-seat storm: 500 users -> A1 =====================================
+  201 ............................ 1
+  409 seat_taken ................. 499
+  5xx ............................ 0
+  transport errors ............... 0
+  latency p50/p95/p99 ............ 5071ms / 6314ms / 6329ms (max 6416ms)
+  wall time ...................... 6.7s (74 req/s)
+  tokens: 500 minted in 2.3s (32 in flight, outside the timed window)
+  winner: b3bb5a3-h498 (c868aeaa-2f89-4863-b252-22c910eb92e7)
+  reconciliation: 9+0+1 == 10
+  show ae56f820-f00a-40ea-9d76-66f8a664c4ab
+  RESULT ......................... PASS
+
+== idempotent retries: 200 × one key -> X1 =============================
+  200 ............................ 198
+  201 ............................ 1
+  502 non_json ................... 1
+  5xx ............................ 1
+  transport errors ............... 0
+  latency p50/p95/p99 ............ 5164ms / 8368ms / 8566ms (max 8661ms)
+  wall time ...................... 8.7s (23 req/s)
+  tokens: 1 minted in 0.1s (32 in flight, outside the timed window)
+  key in header/body: 100/100   reservation: 44a91c13-dabf-45b4-802a-12f1dcbffba6
+  header/body mismatch probe: 400 validation
+  reconciliation: 2+0+1 == 3
+  show 71a7d24e-7d0e-49fd-8bcf-991ff522949e
+  FAIL: 5xx responses: 502 non_json×1
+  FAIL: every other response should be a 200 replay; got 502 non_json×1
+  RESULT ......................... FAIL
+
+== same key, different request: 200 × one key -> X | Y =================
+  200 ............................ 99
+  201 ............................ 1
+  409 idempotency_key_conflict ... 100
+  5xx ............................ 0
+  transport errors ............... 0
+  latency p50/p95/p99 ............ 4333ms / 6436ms / 6542ms (max 6555ms)
+  wall time ...................... 6.6s (30 req/s)
+  tokens: 1 minted in 0.1s (32 in flight, outside the timed window)
+  winning seat: X   reservation: 4a77b69c-10b0-4954-b0a0-3c8a891e35e5
+  sequential reuse with [Z]: 409 idempotency_key_conflict
+  reconciliation: 2+0+1 == 3
+  show c96db335-088e-4a7f-bd04-a7d27d3ce3ca
+  RESULT ......................... PASS
+
+== per-user limit: 50 seats × one user, limit 4 then 2 =================
+  201 ............................ 6
+  409 per_user_limit ............. 94
+  5xx ............................ 0
+  transport errors ............... 0
+  latency p50/p95/p99 ............ 1043ms / 1534ms / 1635ms (max 1635ms)
+  wall time ...................... 3.1s (33 req/s)
+  tokens: 1 minted in 0.1s (32 in flight, outside the timed window)
+  per_user_limit 4: 4×201, 46×409 per_user_limit, owns [L11,L4,L44,L5]   show 467f8f1c-3378-4dbe-8de0-edcb5821850c
+  per_user_limit 2: 2×201, 48×409 per_user_limit, owns [L1,L2]   show d2c12f88-854a-4227-85ee-4cf51421dc58
+  RESULT ......................... PASS
+
+== mixed storm: 20000 requests, 5000 users, 1000 seats =================
+  200 ............................ 18
+  201 ............................ 773
+  409 per_user_limit ............. 1
+  409 seat_taken ................. 3751
+  502 non_json ................... 25
+  transport timeout .............. 15432
+  5xx ............................ 25
+  transport errors ............... 15432
+  latency p50/p95/p99 ............ 41566ms / 58730ms / 59847ms (max 60286ms)
+  wall time ...................... 63.9s (313 req/s)
+  tokens: 5000 minted in 17.1s (32 in flight, outside the timed window)
+  reservations: 773, seats confirmed: 915 of 1000, users at the limit: 10
+  ownership: 0 seats in two reservations, max seats per user 4 (limit 4), confirmed 928 != won 915
+  reconciliation: 72+0+928 == 1000
+  show 8c16f1ae-9bff-4115-9c58-9d38a9995063
+  FAIL: 5xx responses: 502 non_json×25
+  FAIL: transport errors: transport timeout×15432
+  FAIL: confirmed seats (928) differ from the seats in successful responses (915): 13 extra confirmed seats, consistent with commits by some of the 15432 timed-out requests
+  RESULT ......................... FAIL
+
+== cancel/rebook: A reserves Z, B can't cancel it, A cancels, C rebooks 
+  200 ............................ 2
+  201 ............................ 2
+  403 not_owner .................. 1
+  5xx ............................ 0
+  transport errors ............... 0
+  latency p50/p95/p99 ............ 96ms / 107ms / 107ms (max 107ms)
+  wall time ...................... 0.5s (10 req/s)
+  tokens: 3 minted in 0.1s (32 in flight, outside the timed window)
+  A reserve 201 -> B cancel 403 not_owner -> A cancel 200 -> C reserve 201 -> A cancel again 200
+  Z owned by C: confirmed (7b0ace0c-2f91-433d-a247-5ea9f88ed8a4)
+  reconciliation: 1+0+1 == 2
+  show 1b2c5265-4bcc-4554-b4c1-fe87152cc6e3
+  RESULT ......................... PASS
+
+== final reconciliation: 7 shows, /metrics vs GET /shows/{id} ==========
+  show_seats ae56f820-f00a-40ea-9d76-66f8a664c4ab: 9/0/1 of 10   API 9/0/1 of 10   OK
+  show_seats 71a7d24e-7d0e-49fd-8bcf-991ff522949e: 2/0/1 of 3   API 2/0/1 of 3   OK
+  show_seats c96db335-088e-4a7f-bd04-a7d27d3ce3ca: 2/0/1 of 3   API 2/0/1 of 3   OK
+  show_seats 467f8f1c-3378-4dbe-8de0-edcb5821850c: 46/0/4 of 50   API 46/0/4 of 50   OK
+  show_seats d2c12f88-854a-4227-85ee-4cf51421dc58: 48/0/2 of 50   API 48/0/2 of 50   OK
+  show_seats 8c16f1ae-9bff-4115-9c58-9d38a9995063: 72/0/928 of 1000   API 72/0/928 of 1000   OK
+  show_seats 1b2c5265-4bcc-4554-b4c1-fe87152cc6e3: 1/0/1 of 2   API 1/0/1 of 2   OK
+  per-show gauges vs API: 7/7 shows match
+  server metrics: reservations_confirmed_total=1578 reservations_cancelled_total=2 seats_available=493
+  server declines: idempotency_key_conflict=202  idempotent_replay=645  per_user_limit=189  seat_taken=8224  show_not_found=0  unknown_seat=0  validation=0
+  RESULT ......................... PASS
+
+== TOTALS ==============================================================
+confirmed: 784   seat_taken: 4250   per_user_limit: 95   idempotent_replay: 315
+idempotency_key_conflict: 100   not_owner: 1   cancelled: 2   other_2xx: 0   other_4xx: 0
+5xx: 26   transport_errors: 15432
+requests: 21005   latency p50/p95/p99 (all requests): 37413ms / 58214ms / 59835ms (max 60286ms)
+per-show gauges vs API: 7/7 shows match
+server metrics: reservations_confirmed_total=1578 reservations_cancelled_total=2 seats_available=493
+server declines: idempotency_key_conflict=202  idempotent_replay=645  per_user_limit=189  seat_taken=8224  show_not_found=0  unknown_seat=0  validation=0
+zero-5xx gate (D-088): FAIL
+OVERALL: FAIL

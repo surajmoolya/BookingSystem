@@ -27,6 +27,9 @@ public sealed class Scenarios(ServiceClient client, BurstOptions options)
 
         var failures = new List<string>();
         Expect(failures, outcomes.Count(o => o.Status == 201) == 1, $"expected exactly 1×201, got {outcomes.Count(o => o.Status == 201)}");
+        var winner = outcomes.FirstOrDefault(o => o.Status == 201);
+        Expect(failures, winner is null || (winner.ReservationId is not null && winner.Seats.SequenceEqual(["A1"])),
+            $"the winning response should carry a reservation id for exactly [A1]; got [{string.Join(",", winner?.Seats ?? [])}]");
         var others = outcomes.Where(o => o.Status != 201).ToArray();
         Expect(failures, others.All(o => o is { Status: 409, Code: "seat_taken" }),
             $"every other response should be 409 seat_taken; got {Describe(others.Where(o => o.Code != "seat_taken"))}");
@@ -37,7 +40,7 @@ public sealed class Scenarios(ServiceClient client, BurstOptions options)
         Expect(failures, show.Confirmed == 1 && show.SeatStatus.GetValueOrDefault("A1") == "confirmed",
             $"show state should have only A1 confirmed; confirmed={show.Confirmed}, A1={show.SeatStatus.GetValueOrDefault("A1")}");
 
-        var lines = new List<string> { minted, $"reconciliation: {show.Available}+{show.Held}+{show.Confirmed} == {show.Total}", $"show {showId}" };
+        var lines = new List<string> { minted, $"winner: {winner?.UserId ?? "none"} ({winner?.ReservationId})", $"reconciliation: {show.Available}+{show.Held}+{show.Confirmed} == {show.Total}", $"show {showId}" };
         return (new ScenarioResult("hot", $"hot-seat storm: {users.Length} users -> A1", outcomes, failures, stopwatch.Elapsed), lines);
     }
 

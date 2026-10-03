@@ -9,6 +9,10 @@
 plan/
 tests/
 tools/
+# ...except the burst tool, for tools/Burst/Dockerfile (the API image only copies src/).
+!tools/Burst/
+tools/Burst/bin/
+tools/Burst/obj/
 docker-compose*.yml
 Dockerfile
 .dockerignore

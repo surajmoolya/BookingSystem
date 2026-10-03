@@ -70,6 +70,24 @@ public class MetricsApiTests(ApiFixture api) : IClassFixture<ApiFixture>
         Assert.Equal(1, scrape.Value("seats_gauge_stale"));
     }
 
+    [Fact]
+    public async Task Npgsql_pool_metrics_are_bridged_with_the_pool_name_not_the_connection_string()
+    {
+        var showId = await CreateShowAsync(api.Client, Labels(1));
+        Assert.True((await ReserveAsync(api.Client, showId, _alice, ["S1"], "k-pool")).Is(HttpStatusCode.Created));
+
+        var scrape = await MetricsScrape.FetchAsync(api.Client);
+
+        // Npgsql's meter is process-wide, so other hosts' pools in this test process show up too; ours are named.
+        Assert.Equal(40, scrape.Value("npgsql_db_client_connections_max", ("pool_name", "seatres-api")));
+        Assert.Equal(3, scrape.Value("npgsql_db_client_connections_max", ("pool_name", "seatres-ops")));
+        Assert.Contains(scrape.Named("npgsql_db_client_connections_usage"), s => s.Has("pool_name", "seatres-api") && s.Has("state", "idle"));
+        Assert.Contains(scrape.Named("npgsql_db_client_connections_usage"), s => s.Has("pool_name", "seatres-api") && s.Has("state", "used"));
+        Assert.Contains("npgsql_db_client_connections_create_time", scrape.DeclaredNames);
+        Assert.DoesNotContain(scrape.DeclaredNames, n => n.StartsWith("npgsql_db_client_commands", StringComparison.Ordinal));
+        Assert.DoesNotContain(scrape.Samples, s => s.Labels.Values.Any(v => v.Contains("Password", StringComparison.OrdinalIgnoreCase)));
+    }
+
     private static double Delta(MetricsScrape before, MetricsScrape after, string name, params (string Label, string Value)[] labels) =>
         after.Value(name, labels) - before.Value(name, labels);
 }

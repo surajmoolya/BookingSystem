@@ -45,6 +45,7 @@ public sealed class DataSources(NpgsqlDataSource main, NpgsqlDataSource ops) : I
             IncludeErrorDetail = includeErrorDetail,
         };
 
-        return new NpgsqlDataSourceBuilder(builder.ConnectionString).Build();
+        // Name = the pool's label in Npgsql's metrics (pool.name); without it Npgsql uses the connection string, host and all.
+        return new NpgsqlDataSourceBuilder(builder.ConnectionString) { Name = applicationName }.Build();
     }
 }

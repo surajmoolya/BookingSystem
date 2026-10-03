@@ -21,9 +21,9 @@ public static class HttpMetricsSetup
 
     /// <summary>
     /// Registers the host's registry and its <see cref="IMetricFactory"/> (used by every layer's metrics), with the
-    /// <c>process_*</c> / <c>dotnet_*</c> collectors. The EventCounter and Meter bridges of the default registry are not
+    /// <c>process_*</c> / <c>dotnet_*</c> collectors. The default registry's EventCounter and all-meters bridges are not
     /// used: they export many series we don't read (including ASP.NET Core's own duplicate request metrics) and
-    /// sample on a timer, which costs CPU on a small instance.
+    /// sample on a timer, which costs CPU on a small instance. Only Npgsql's meter is bridged (<see cref="NpgsqlPoolMetrics"/>).
     /// </summary>
     public static IServiceCollection AddMetricsRegistry(this IServiceCollection services)
     {
@@ -32,6 +32,7 @@ public static class HttpMetricsSetup
         services.AddSingleton(registry);
         services.AddSingleton<IMetricFactory>(Metrics.WithCustomRegistry(registry));
         services.AddSingleton<SeatGaugeCollector>();
+        services.AddSingleton<NpgsqlPoolMetrics>();
         return services;
     }
 
@@ -59,11 +60,12 @@ public static class HttpMetricsSetup
 
     /// <summary>
     /// Maps <c>GET /metrics</c> onto the host's registry (anonymous, outside any rate limit), and creates the seat gauge
-    /// collector, whose constructor hooks its refresh into every scrape.
+    /// collector (its constructor hooks its refresh into every scrape) and the Npgsql pool bridge.
     /// </summary>
     public static IEndpointConventionBuilder MapHostMetrics(this IEndpointRouteBuilder endpoints)
     {
         _ = endpoints.ServiceProvider.GetRequiredService<SeatGaugeCollector>();
+        _ = endpoints.ServiceProvider.GetRequiredService<NpgsqlPoolMetrics>();
         return endpoints.MapMetrics("/metrics", endpoints.ServiceProvider.GetRequiredService<CollectorRegistry>())
             .AllowAnonymous();
     }

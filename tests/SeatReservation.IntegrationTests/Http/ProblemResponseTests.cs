@@ -91,21 +91,15 @@ public sealed class ProblemResponseTests : IAsyncLifetime
     [Fact]
     public async Task A_correlation_id_set_by_middleware_survives_the_exception_handler_in_both_body_and_header()
     {
-        // CorrelationIdMiddleware (T-5.9) runs before UseExceptionHandler, which clears the response headers; the id must still arrive.
-        await using var factory = new ApiFactory(
-            ApiFactory.UnreachableConnectionString,
-            configureServices: services =>
-            {
-                services.AddControllers().AddApplicationPart(typeof(ErrorProbeController).Assembly);
-                services.AddTransient<Microsoft.AspNetCore.Hosting.IStartupFilter, HeaderStartupFilter>();
-            });
-        using var client = factory.CreateClient();
+        // CorrelationIdMiddleware runs before UseExceptionHandler, which clears the response headers; the id must still arrive.
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/_probe/boom");
+        request.Headers.Add("X-Correlation-ID", "corr-from-client");
 
-        using var response = await client.GetAsync("/_probe/boom");
+        using var response = await _client.SendAsync(request);
 
         var problem = await ReadProblemAsync(response, HttpStatusCode.InternalServerError, "internal_error");
-        Assert.Equal("corr-from-middleware", problem.GetProperty("correlation_id").GetString());
-        Assert.Equal("corr-from-middleware", response.Headers.GetValues("X-Correlation-ID").Single());
+        Assert.Equal("corr-from-client", problem.GetProperty("correlation_id").GetString());
+        Assert.Equal("corr-from-client", response.Headers.GetValues("X-Correlation-ID").Single());
     }
 
     [Fact]
@@ -192,18 +186,5 @@ public sealed class ProblemResponseTests : IAsyncLifetime
         Assert.DoesNotContain(ErrorProbeController.SecretDetail, text);
         Assert.DoesNotContain("Exception", text);
         Assert.DoesNotContain("   at ", text);
-    }
-
-    private sealed class HeaderStartupFilter : Microsoft.AspNetCore.Hosting.IStartupFilter
-    {
-        public Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> Configure(Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> next) => app =>
-        {
-            app.Use(async (context, nextMiddleware) =>
-            {
-                CorrelationIds.Set(context, "corr-from-middleware");
-                await nextMiddleware();
-            });
-            next(app);
-        };
     }
 }

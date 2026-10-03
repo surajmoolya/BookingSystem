@@ -47,6 +47,7 @@ builder.Services.AddHostedService<ShutdownDrain>();
 
 var app = builder.Build();
 
+app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseRequestCompletionLogging();
 app.UseExceptionHandler();
 app.UseRouting();

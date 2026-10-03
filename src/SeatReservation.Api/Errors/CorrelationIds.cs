@@ -9,7 +9,7 @@ public static class CorrelationIds
     /// Records the request's correlation id and arranges for it to be sent as <see cref="HeaderName"/>. The id lives in
     /// <c>HttpContext.Items</c>, and the header is written in <c>OnStarting</c>, because the exception-handler middleware
     /// clears the response (headers included) before it runs the handler: a header set up front would be lost on exactly the
-    /// error responses where it is most needed. Called by the correlation middleware (T-5.9).
+    /// error responses where it is most needed. Called by <c>CorrelationIdMiddleware</c>.
     /// </summary>
     public static void Set(HttpContext context, string correlationId)
     {

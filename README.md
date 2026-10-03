@@ -12,7 +12,9 @@ C# / .NET 8 + PostgreSQL 16 seat-reservation service.
 | `GET /health/ready` | `200 Healthy` when the database answers and migrations are applied, otherwise `503` |
 
 The service runs on Render's free tier: after ~15 minutes without traffic it spins down, and the first request
-afterwards waits for a cold start. Hit `/health/ready` once before testing.
+afterwards waits for a cold start. The `keep-alive` workflow (`.github/workflows/keep-alive.yml`) pings
+`/health/live` every 5 minutes to prevent that; GitHub may delay scheduled runs, so still hit `/health/ready` once
+before testing.
 
 ## Run locally
 

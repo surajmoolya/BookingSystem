@@ -1,0 +1,28 @@
+name: keep-alive
+
+# Render's free plan spins the service down after ~15 minutes without traffic.
+# Ping the liveness endpoint every 5 minutes so it stays warm.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: keep-alive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      HEALTH_URL: https://seatres-api.onrender.com/health/live
+    steps:
+      - name: Ping /health/live
+        # --max-time covers a cold start if the instance did spin down; retries absorb Render edge 502s.
+        run: |
+          curl --fail --silent --show-error \
+            --max-time 90 \
+            --retry 3 --retry-delay 10 --retry-all-errors \
+            --write-out '\nHTTP %{http_code} in %{time_total}s\n' \
+            "$HEALTH_URL"

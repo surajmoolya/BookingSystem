@@ -15,7 +15,8 @@ metrics that reconcile with the API.
 - [API](#api)
 - [Reservation rules](#reservation-rules)
 - [Error codes](#error-codes)
-- [Health and metrics](#health-and-metrics)
+- [Health](#health)
+- [Metrics guide](#metrics-guide)
 - [Burst tool](#burst-tool)
 - [Architecture](#architecture)
 - [Load test results (free plan)](#load-test-results-free-plan)
@@ -300,7 +301,7 @@ Clients should branch on `code`, not on `title`.
 A `503` means nothing was changed, so the request is safe to retry with the same idempotency key. In fact any retry
 with the same key is safe.
 
-## Health and metrics
+## Health
 
 | Endpoint | Meaning |
 |---|---|
@@ -310,30 +311,107 @@ with the same key is safe.
 
 None of these wait in the admission queue, so they answer even while a burst is running.
 
-Main metrics (all low-cardinality, no user or reservation ids):
+Their use is described in the [metrics guide](#metrics-guide).
 
-| Metric | Type | What it shows |
-|---|---|---|
-| `http_requests_received_total{code,method,endpoint}` | counter | Request rate and status mix (5xx rate) |
-| `http_request_duration_seconds{code,method,endpoint}` | histogram | Latency (p50/p95/p99) per endpoint |
-| `reservations_confirmed_total`, `reservation_seats_confirmed_total` | counter | Successful reservations and seats sold |
-| `reservations_declined_total{reason}` | counter | Declines by reason: `seat_taken`, `per_user_limit`, `idempotent_replay`, `idempotency_key_conflict`, … |
-| `reservations_cancelled_total` | counter | Cancellations |
-| `show_seats{show_id,state}`, `show_seats_total{show_id}` | gauge | Per-show seat counts (`available`, `held`, `confirmed`), read from the database; they match `GET /shows/{id}` |
-| `seats_available`, `seats_held`, `seats_confirmed`, `seats_total` | gauge | The same, summed over all shows |
-| `reservation_queue_length` | gauge | Requests waiting for a database slot |
-| `db_up`, `db_query_duration_seconds`, `db_errors_total`, `db_transaction_retries_total` | mixed | Database health, latency, errors and retried transactions |
+## Metrics guide
 
-`show_seats` is the one metric labelled by `show_id`. It covers the 200 most recent shows, so its cardinality stays
-bounded, and it is read from the database at scrape time (cached for 1 s), so it always matches the API.
+`GET /metrics` is plain Prometheus text, so `curl -s $BASE/metrics | grep reservations_` already answers most
+questions. With Prometheus scraping it, the queries below answer them over time.
 
-**Single instance.** The service runs as one instance (`numInstances: 1` in `render.yaml`). The counters live in the
-process, so with one instance `/metrics` is the whole picture and reconciles exactly with the API, which the burst tool
-checks. With several instances you'd sum the counters across instances in Prometheus; the per-show gauges, read from
-the database, would stay correct either way.
+### Metric catalog
 
-For local dashboards, `docker compose --profile observability up --build` also starts Prometheus
-(http://localhost:9090) and Grafana (http://localhost:3000, dashboard "Seat Reservation").
+Labels are low-cardinality only: there are never `user_id`, `reservation_id` or request-id labels (those are in the
+logs). `endpoint` is the route template, e.g. `shows/{id}/reserve`.
+
+| Metric | Type | Labels | What it shows |
+|---|---|---|---|
+| `http_requests_received_total` | counter | `code`, `method`, `endpoint` | Every HTTP response by status: throughput, status mix, 5xx |
+| `http_request_duration_seconds` | histogram | `code`, `method`, `endpoint` | HTTP latency, including time spent in the admission queue (buckets 1 ms – 30 s) |
+| `http_requests_in_progress` | gauge | `method`, `endpoint` | Requests in flight, including queued ones |
+| `reservation_queue_length` | gauge | — | Requests waiting for a database slot in the admission queue |
+| `reservations_confirmed_total` | counter | — | New reservations committed. A replay does **not** count here |
+| `reservation_seats_confirmed_total` | counter | — | Seats in those new reservations |
+| `reservations_declined_total` | counter | `reason` | Reserve attempts that didn't create a reservation: `seat_taken`, `per_user_limit`, `idempotent_replay`, `idempotency_key_conflict`, `unknown_seat`, `show_not_found`, `validation` |
+| `reservations_cancelled_total` | counter | — | Cancels that released seats (a repeated cancel doesn't count) |
+| `reservation_duration_seconds` | histogram | `outcome` | Time inside the reservation logic (`created`, `replayed`, `declined`, `error`), without HTTP or queueing |
+| `show_seats` | gauge | `show_id`, `state` | Per-show seat counts, `state` = `available`, `held`, `confirmed` |
+| `show_seats_total` | gauge | `show_id` | Seats per show |
+| `seats_available`, `seats_held`, `seats_confirmed`, `seats_total` | gauge | — | The same, over all shows |
+| `seats_gauge_stale` | gauge | — | `1` when the last seat-count query failed or timed out and the seat gauges show older values |
+| `db_up` | gauge | — | `1` if the last database probe succeeded |
+| `db_query_duration_seconds` | histogram | `operation` | Database time per operation (`reserve`, `cancel`, `fast_path`, `get_show`, `create_show`, `gauges`, `health`, …) |
+| `db_errors_total` | counter | `operation`, `kind` | Database errors: `transient` (retried), `unavailable`, `bug` |
+| `db_transaction_retries_total` | counter | `operation` | Transactions retried after a deadlock, serialization failure or dropped connection |
+| `npgsql_db_client_connections_usage` | gauge | `pool_name`, `state` | Pool connections `used` / `idle` (pools `seatres-api` and `seatres-ops`) |
+| `npgsql_db_client_connections_max`, `…_pending_requests` | gauge | `pool_name` | Pool size, and requests waiting for a connection |
+| `dotnet_*`, `process_*` | various | — | Runtime: CPU, memory, GC, threads |
+
+**Seat gauges come from the database.** `show_seats` and `seats_*` aren't counted in memory: each scrape reads them
+from Postgres (one query, cached for 1 s), so they are correct after a restart and always agree with
+`GET /shows/{id}`. `show_seats` is the only metric labelled by `show_id`, and it covers only the 200 most recently
+created shows, so the number of series stays bounded.
+
+**Single instance.** The counters (`*_total`) live in the process and start from 0 when it starts. The service runs as
+one instance (`numInstances: 1` in `render.yaml`), so `/metrics` sees every request and reconciles exactly with the
+API. With more instances, Prometheus would sum the counters across them; the database-backed seat gauges would be
+correct either way.
+
+### PromQL cheat-sheet
+
+| Question | PromQL |
+|---|---|
+| How many requests per second? | `sum(rate(http_requests_received_total[30s]))` |
+| … per endpoint? | `sum by (endpoint) (rate(http_requests_received_total[30s]))` |
+| Reserve latency p50 / p95 / p99 / p99.9? | `histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{endpoint="shows/{id}/reserve"}[1m])))` (change `0.99`) |
+| How many requests fail with 5xx? | `sum(rate(http_requests_received_total{code=~"5.."}[1m])) or vector(0)` |
+| What do reserves return? | `sum by (code) (increase(http_requests_received_total{endpoint="shows/{id}/reserve"}[5m]))` |
+| How many reservations succeed? | `sum(increase(reservations_confirmed_total[5m]))`, or `rate(...)` for per second |
+| Why are reserves declined? | `sum by (reason) (increase(reservations_declined_total[5m]))` |
+| How much is in flight / queued? | `sum(http_requests_in_progress)`, `reservation_queue_length` |
+| How many seats are left in this show? | `show_seats{show_id="<id>"}` (equals the `counts` of `GET /shows/<id>`) |
+| How many seats are left overall? | `seats_available` |
+| Do the seat counts add up? | `sum by (show_id) (show_seats) - on (show_id) show_seats_total` (must be `0` for every show) |
+| Is the database healthy? | `db_up`, `histogram_quantile(0.99, sum by (le, operation) (rate(db_query_duration_seconds_bucket[1m])))`, `sum by (operation, kind) (rate(db_errors_total[1m]))` |
+| Is the pool saturated? | `npgsql_db_client_connections_usage{state="used"}` vs `npgsql_db_client_connections_max`, and `npgsql_db_client_connections_pending_requests` |
+
+A series appears only once something has happened: with no 5xx yet, the 5xx query returns nothing, hence the
+`or vector(0)`; `npgsql_db_client_connections_pending_requests` appears once a request has had to wait for a
+connection. Without Prometheus, read the counters before and after a run and subtract.
+
+### Reading a burst
+
+The [burst tool](#burst-tool) prints one block per scenario, then totals. Taking
+[docs/burst-report-final.txt](docs/burst-report-final.txt) as the example:
+
+- **Per scenario:** the count of each status and `code` (`201`, `409 seat_taken`, …), `5xx`, `transport errors`
+  (timeouts, resets: no HTTP answer at all), latency p50/p95/p99 and the throughput. `reconciliation` is
+  `available+held+confirmed == total` for that scenario's show, and `FAIL:` lines say exactly which check failed.
+- **`502 non_json`** means a 5xx whose body wasn't the API's JSON problem document: it came from a proxy in front of the
+  service (Render's edge), not from the API. The server's own `http_requests_received_total{code=~"5.."}` doesn't see it.
+- **`ownership`** (mixed storm) is the double-booking check: `0 seats in two reservations` and the most seats any user
+  holds. `confirmed X != won Y` means the database confirmed more seats than the client saw succeed. That happens when
+  a request commits after the client's timeout, and a retry with the same key would return it.
+- **Final reconciliation** compares each show's `show_seats` gauges in `/metrics` with `GET /shows/{id}`: `7/7 shows
+  match` means the metrics and the API agree.
+- **`server metrics` / `server declines`** are the service's own counters. On a fresh instance they match the client's
+  totals, give or take requests the client never saw answered: in the final report the server counted 838 new
+  reservations against the 830 `201`s the client received. The 8 extra committed after their client had timed out
+  (some were then seen through a `200` replay of a duplicate retry). Counters are since the process started, so on a
+  long-running instance compare their change over the run.
+- **`zero-5xx gate`** passes only with no 5xx and no transport errors; `OVERALL` passes only if everything above does.
+
+### Local dashboards (optional)
+
+```bash
+docker compose --profile observability up --build
+```
+
+This also starts Prometheus on http://localhost:9090 (scraping the API every 5 s, `ops/prometheus.yml`) and Grafana on
+http://localhost:3000 (anonymous, read-only), which opens on the provisioned "Seat Reservation" dashboard
+(`ops/grafana/`). Its panels: DB up, 5xx, confirmed reservations, seats available, in flight, queue length, requests per
+second by endpoint, reserve latency p50–p99.9, reserve status mix, declines by reason, confirmed and cancelled, seats,
+DB pool connections, DB latency by operation, DB errors and retries, gauge staleness and the seat invariant. Run the
+burst against `http://127.0.0.1:8080` and watch them move.
 
 ## Burst tool
 

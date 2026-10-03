@@ -19,4 +19,8 @@ public sealed class NullReservationMetrics : IReservationMetrics
     public void Cancelled()
     {
     }
+
+    public void ObserveDuration(ReservationResultKind kind, TimeSpan elapsed)
+    {
+    }
 }

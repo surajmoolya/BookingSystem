@@ -28,14 +28,31 @@ public sealed class ReservationService(
 {
     /// <summary>
     /// Decides, then records the outcome exactly once: after the transaction has finished, so a retried delegate never
-    /// counts twice. A thrown exception records nothing here; it surfaces as a 5xx and is counted at the HTTP layer.
+    /// counts twice. A thrown exception records no outcome (it surfaces as a 5xx, counted at the HTTP layer), only its duration.
     /// </summary>
     public async Task<ReservationOutcome> ReserveAsync(ReserveSeatsCommand command, CancellationToken ct)
     {
         var started = Stopwatch.GetTimestamp();
         LogAttempt(command);
-        var outcome = await DecideAsync(command, ct);
-        Record(command, outcome, Stopwatch.GetElapsedTime(started));
+        ReservationOutcome outcome;
+        try
+        {
+            outcome = await DecideAsync(command, ct);
+        }
+        catch
+        {
+            metrics.ObserveDuration(ReservationResultKind.Error, Stopwatch.GetElapsedTime(started));
+            throw;
+        }
+
+        var elapsed = Stopwatch.GetElapsedTime(started);
+        Record(command, outcome, elapsed);
+        metrics.ObserveDuration(outcome switch
+        {
+            ReservationOutcome.Created => ReservationResultKind.Created,
+            ReservationOutcome.Replayed => ReservationResultKind.Replayed,
+            _ => ReservationResultKind.Declined,
+        }, elapsed);
         return outcome;
     }
 

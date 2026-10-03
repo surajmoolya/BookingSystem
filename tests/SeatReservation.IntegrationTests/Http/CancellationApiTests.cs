@@ -47,6 +47,10 @@ public sealed class CancellationApiFixture(PostgresFixture postgres) : IAsyncLif
         }
 
         void IReservationMetrics.Cancelled() => Interlocked.Increment(ref _cancelled);
+
+        public void ObserveDuration(ReservationResultKind kind, TimeSpan elapsed)
+        {
+        }
     }
 }
 

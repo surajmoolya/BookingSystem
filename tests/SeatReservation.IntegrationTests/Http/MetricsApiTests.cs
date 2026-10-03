@@ -39,4 +39,23 @@ public class MetricsApiTests(ApiFixture api) : IClassFixture<ApiFixture>
     [Fact]
     public void The_logic_layer_records_into_the_prometheus_adapter_not_the_null_default() =>
         Assert.IsType<PrometheusReservationMetrics>(api.Factory.Services.GetRequiredService<IReservationMetrics>());
+
+    [Fact]
+    public async Task Reservation_duration_is_observed_by_outcome()
+    {
+        var before = await MetricsScrape.FetchAsync(api.Client);
+        var showId = await CreateShowAsync(api.Client, Labels(2));
+        Assert.True((await ReserveAsync(api.Client, showId, _alice, ["S1"], "k-dur")).Is(HttpStatusCode.Created));
+        Assert.True((await ReserveAsync(api.Client, showId, _alice, ["S1"], "k-dur")).Is(HttpStatusCode.OK));
+
+        var after = await MetricsScrape.FetchAsync(api.Client);
+        Assert.Equal(1, Delta(before, after, "reservation_duration_seconds_count", ("outcome", "created")));
+        Assert.Equal(1, Delta(before, after, "reservation_duration_seconds_count", ("outcome", "replayed")));
+        Assert.Equal(
+            ["created", "declined", "error", "replayed"],
+            after.Named("reservation_duration_seconds_count").Select(s => s.Labels["outcome"]).Order(StringComparer.Ordinal));
+    }
+
+    private static double Delta(MetricsScrape before, MetricsScrape after, string name, params (string Label, string Value)[] labels) =>
+        after.Value(name, labels) - before.Value(name, labels);
 }

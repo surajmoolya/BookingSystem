@@ -12,9 +12,13 @@ public sealed class RecordingMetrics : IReservationMetrics
 
     public int CancelledCount { get; private set; }
 
+    public List<ReservationResultKind> DurationKinds { get; } = [];
+
     public void Confirmed(int seatCount) => ConfirmedSeatCounts.Add(seatCount);
 
     public void Declined(DeclineReason reason) => DeclinedReasons.Add(reason);
 
     public void Cancelled() => CancelledCount++;
+
+    public void ObserveDuration(ReservationResultKind kind, TimeSpan elapsed) => DurationKinds.Add(kind);
 }

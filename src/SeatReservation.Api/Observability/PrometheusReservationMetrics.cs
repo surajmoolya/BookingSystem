@@ -14,6 +14,7 @@ public sealed class PrometheusReservationMetrics : IReservationMetrics
     private readonly Counter _seatsConfirmed;
     private readonly Counter _cancelled;
     private readonly Counter.Child[] _declined;
+    private readonly Histogram.Child[] _duration;
 
     public PrometheusReservationMetrics(IMetricFactory factory)
     {
@@ -35,6 +36,16 @@ public sealed class PrometheusReservationMetrics : IReservationMetrics
             _declined[(int)reason] = declined.WithLabels(Label(reason));
         }
 
+        var duration = factory.CreateHistogram(
+            "reservation_duration_seconds",
+            "Service-level latency of one reserve call, excluding HTTP overhead, by result.",
+            new HistogramConfiguration { LabelNames = ["outcome"], Buckets = HttpMetricsSetup.DurationBuckets });
+        var kinds = Enum.GetValues<ReservationResultKind>();
+        _duration = new Histogram.Child[kinds.Length];
+        foreach (var kind in kinds)
+        {
+            _duration[(int)kind] = duration.WithLabels(kind.ToString().ToLowerInvariant());
+        }
     }
 
     public void Confirmed(int seatCount)
@@ -46,6 +57,8 @@ public sealed class PrometheusReservationMetrics : IReservationMetrics
     public void Declined(DeclineReason reason) => _declined[(int)reason].Inc();
 
     public void Cancelled() => _cancelled.Inc();
+
+    public void ObserveDuration(ReservationResultKind kind, TimeSpan elapsed) => _duration[(int)kind].Observe(elapsed.TotalSeconds);
 
     /// <summary>The <c>reason</c> label value, matching the problem <c>code</c>s (lld §9).</summary>
     public static string Label(DeclineReason reason) => reason switch

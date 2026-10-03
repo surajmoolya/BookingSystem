@@ -520,6 +520,38 @@ public class ReservationServiceTests
     }
 
     [Fact]
+    public async Task Duration_is_observed_once_per_call_with_its_result_kind()
+    {
+        await ReserveAsync(Command("A1"));                                   // created
+        await ReserveAsync(Command("A1"));                                   // same key, same seats: replayed
+        await ReserveAsync(Command("Z9") with { IdempotencyKey = "key-2" }); // unknown seat: declined
+
+        Assert.Equal([ReservationResultKind.Created, ReservationResultKind.Replayed, ReservationResultKind.Declined], _metrics.DurationKinds);
+    }
+
+    [Fact]
+    public async Task Duration_is_observed_as_error_when_the_call_throws()
+    {
+        _tx.FailWith = new DependencyUnavailableException();
+
+        await Assert.ThrowsAsync<DependencyUnavailableException>(() => ReserveAsync(Command()));
+
+        Assert.Equal([ReservationResultKind.Error], _metrics.DurationKinds);
+        Assert.Empty(_metrics.DeclinedReasons);
+        Assert.Empty(_metrics.ConfirmedSeatCounts);
+    }
+
+    [Fact]
+    public async Task Duration_is_observed_once_even_if_the_runner_retried_the_delegate()
+    {
+        _tx.SimulatedRetries = 2;
+
+        await ReserveAsync(Command("A1"));
+
+        Assert.Equal([ReservationResultKind.Created], _metrics.DurationKinds);
+    }
+
+    [Fact]
     public async Task Metrics_replay_records_idempotent_replay_and_not_confirmed()
     {
         await FirstReservationAsync();

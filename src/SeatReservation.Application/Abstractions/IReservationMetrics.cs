@@ -4,7 +4,6 @@ namespace SeatReservation.Application.Abstractions;
 
 /// <summary>
 /// Business metrics, called by the services once per final outcome (never inside a retried transaction delegate).
-/// The service-level latency histogram (<c>ObserveDuration</c> in lld §1.3) is deferred with T-5.3 (D-089).
 /// </summary>
 public interface IReservationMetrics
 {
@@ -13,4 +12,7 @@ public interface IReservationMetrics
     void Declined(DeclineReason reason);
 
     void Cancelled();
+
+    /// <summary>Service-level latency of one reserve call, excluding HTTP overhead. Called once per call, including when it throws.</summary>
+    void ObserveDuration(ReservationResultKind kind, TimeSpan elapsed);
 }

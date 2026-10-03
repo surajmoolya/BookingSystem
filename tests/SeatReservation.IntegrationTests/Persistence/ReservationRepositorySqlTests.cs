@@ -57,7 +57,7 @@ public class ReservationRepositorySqlTests(PostgresFixture postgres)
     private static async Task<Guid> NewShowAsync(MigratedDatabase db, params string[] labels)
     {
         var show = new ShowInfo(Guid.NewGuid(), "show", 25_000, 4, labels.Length);
-        await new PgTransactionRunner(db.Sources, NullLogger<PgTransactionRunner>.Instance).RunAsync("create_show", async (uow, ct) =>
+        await new PgTransactionRunner(db.Sources, db.Metrics, NullLogger<PgTransactionRunner>.Instance).RunAsync("create_show", async (uow, ct) =>
         {
             await uow.Shows.InsertShowWithSeatsAsync(show, labels, ct);
             return TxResult<bool>.CommitWith(true);
@@ -105,7 +105,7 @@ public class ReservationRepositorySqlTests(PostgresFixture postgres)
 
         await ReserveAsync(db, r);
 
-        var reads = new ReservationReadRepository(db.Sources);
+        var reads = new ReservationReadRepository(db.Sources, db.Metrics);
         AssertSame(r, await reads.FindByKeyAsync("alice", "key-1", CancellationToken.None));
         AssertSame(r, await reads.GetByIdAsync(r.Id, CancellationToken.None));
         await using var tx = await OpenTx.BeginAsync(db);
@@ -128,7 +128,7 @@ public class ReservationRepositorySqlTests(PostgresFixture postgres)
         await using var db = await MigratedDatabase.CreateAsync(postgres);
         var showId = await NewShowAsync(db, "A1");
         await ReserveAsync(db, NewReservation(showId, "alice", "key-1", "A1"));
-        var reads = new ReservationReadRepository(db.Sources);
+        var reads = new ReservationReadRepository(db.Sources, db.Metrics);
 
         Assert.Null(await reads.FindByKeyAsync("bob", "key-1", CancellationToken.None));
         Assert.Null(await reads.FindByKeyAsync("alice", "KEY-1", CancellationToken.None));
@@ -180,7 +180,7 @@ public class ReservationRepositorySqlTests(PostgresFixture postgres)
             await tx.Transaction.CommitAsync();
         }
 
-        var read = await new ReservationReadRepository(db.Sources).GetByIdAsync(r.Id, CancellationToken.None);
+        var read = await new ReservationReadRepository(db.Sources, db.Metrics).GetByIdAsync(r.Id, CancellationToken.None);
         Assert.Equal(ReservationStatus.Cancelled, read!.Status);
         Assert.Equal(at, read.CancelledAt);
     }
@@ -368,7 +368,7 @@ public class ReservationRepositorySqlTests(PostgresFixture postgres)
         await ReserveAsync(db, alices);
         await ReserveAsync(db, NewReservation(showId, "bob", "k", "A2"));
 
-        var snapshot = await new ReservationReadRepository(db.Sources)
+        var snapshot = await new ReservationReadRepository(db.Sources, db.Metrics)
             .GetFastPathSnapshotAsync("alice", "key-1", showId, ["A1", "A2", "A3", "ZZ"], CancellationToken.None);
 
         Assert.Equal(alices.Id, snapshot.ExistingForKey?.Id);
@@ -383,7 +383,7 @@ public class ReservationRepositorySqlTests(PostgresFixture postgres)
         await using var db = await MigratedDatabase.CreateAsync(postgres);
         var showId = await NewShowAsync(db, "A1");
 
-        var snapshot = await new ReservationReadRepository(db.Sources)
+        var snapshot = await new ReservationReadRepository(db.Sources, db.Metrics)
             .GetFastPathSnapshotAsync("alice", "never-used", showId, ["A1"], CancellationToken.None);
 
         Assert.Null(snapshot.ExistingForKey);
@@ -412,7 +412,7 @@ public class ReservationRepositorySqlTests(PostgresFixture postgres)
         };
         ActivitySource.AddActivityListener(listener);
 
-        var snapshot = await new ReservationReadRepository(db.Sources).GetFastPathSnapshotAsync("alice", "k", showId, ["A1"], CancellationToken.None);
+        var snapshot = await new ReservationReadRepository(db.Sources, db.Metrics).GetFastPathSnapshotAsync("alice", "k", showId, ["A1"], CancellationToken.None);
 
         Assert.Single(snapshot.Owners);
         Assert.Equal(1, commands);

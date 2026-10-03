@@ -3,18 +3,26 @@ using NpgsqlTypes;
 using SeatReservation.Application.Abstractions;
 using SeatReservation.Application.Shows;
 using SeatReservation.Infrastructure.Persistence;
+using SeatReservation.Infrastructure.Transactions;
+using static SeatReservation.Infrastructure.Transactions.DbMetrics.Operations;
 
 namespace SeatReservation.Infrastructure.Repositories;
 
 /// <summary>Autocommit show reads on the main pool, outside any transaction (lld §5.3).</summary>
-public sealed class ShowReadRepository(DataSources dataSources) : IShowReadRepository
+public sealed class ShowReadRepository(DataSources dataSources, DbMetrics metrics) : IShowReadRepository
 {
     private const string GetShowSql = "SELECT id, name, price_paise, per_user_limit, total_seats FROM shows WHERE id = $1";
 
     // A single statement reads a single snapshot, so the counts aggregated from it always reconcile (D-039).
     private const string SnapshotSql = "SELECT label, status FROM seats WHERE show_id = $1 ORDER BY ordinal";
 
-    public async Task<ShowInfo?> GetShowAsync(Guid showId, CancellationToken ct)
+    public Task<ShowInfo?> GetShowAsync(Guid showId, CancellationToken ct) =>
+        metrics.MeasureAsync(GetShow, () => QueryShowAsync(showId, ct));
+
+    public Task<IReadOnlyList<SeatState>> GetSeatSnapshotAsync(Guid showId, CancellationToken ct) =>
+        metrics.MeasureAsync(GetShow, () => QuerySnapshotAsync(showId, ct));
+
+    private async Task<ShowInfo?> QueryShowAsync(Guid showId, CancellationToken ct)
     {
         await using var command = dataSources.Main.CreateCommand(GetShowSql);
         command.Parameters.Add(new NpgsqlParameter { Value = showId, NpgsqlDbType = NpgsqlDbType.Uuid });
@@ -27,7 +35,7 @@ public sealed class ShowReadRepository(DataSources dataSources) : IShowReadRepos
         return new ShowInfo(reader.GetGuid(0), reader.GetString(1), reader.GetInt64(2), reader.GetInt32(3), reader.GetInt32(4));
     }
 
-    public async Task<IReadOnlyList<SeatState>> GetSeatSnapshotAsync(Guid showId, CancellationToken ct)
+    private async Task<IReadOnlyList<SeatState>> QuerySnapshotAsync(Guid showId, CancellationToken ct)
     {
         await using var command = dataSources.Main.CreateCommand(SnapshotSql);
         command.Parameters.Add(new NpgsqlParameter { Value = showId, NpgsqlDbType = NpgsqlDbType.Uuid });

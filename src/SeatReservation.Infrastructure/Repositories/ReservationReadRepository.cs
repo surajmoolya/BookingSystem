@@ -2,16 +2,32 @@ using Npgsql;
 using SeatReservation.Application.Abstractions;
 using SeatReservation.Application.Reservations;
 using SeatReservation.Infrastructure.Persistence;
+using SeatReservation.Infrastructure.Transactions;
+using static SeatReservation.Infrastructure.Transactions.DbMetrics.Operations;
 using static SeatReservation.Infrastructure.Repositories.ReservationMapping;
 
 namespace SeatReservation.Infrastructure.Repositories;
 
 /// <summary>Autocommit reservation reads on the main pool, outside any transaction (lld §6.3).</summary>
-public sealed class ReservationReadRepository(DataSources dataSources) : IReservationReadRepository
+public sealed class ReservationReadRepository(DataSources dataSources, DbMetrics metrics) : IReservationReadRepository
 {
     private const string OwnersSql = "SELECT label, status, user_id FROM seats WHERE show_id = $1 AND label = ANY($2)";
 
-    public async Task<Reservation?> FindByKeyAsync(string userId, string idempotencyKey, CancellationToken ct)
+    public Task<Reservation?> FindByKeyAsync(string userId, string idempotencyKey, CancellationToken ct) =>
+        metrics.MeasureAsync(GetReservation, () => QueryByKeyAsync(userId, idempotencyKey, ct));
+
+    public Task<Reservation?> GetByIdAsync(Guid reservationId, CancellationToken ct) =>
+        metrics.MeasureAsync(GetReservation, () => QueryByIdAsync(reservationId, ct));
+
+    public Task<FastPathSnapshot> GetFastPathSnapshotAsync(
+        string userId,
+        string idempotencyKey,
+        Guid showId,
+        IReadOnlyList<string> labels,
+        CancellationToken ct) =>
+        metrics.MeasureAsync(FastPath, () => QueryFastPathAsync(userId, idempotencyKey, showId, labels, ct));
+
+    private async Task<Reservation?> QueryByKeyAsync(string userId, string idempotencyKey, CancellationToken ct)
     {
         await using var command = dataSources.Main.CreateCommand(ByKeySql);
         command.Parameters.Add(Text(userId));
@@ -20,7 +36,7 @@ public sealed class ReservationReadRepository(DataSources dataSources) : IReserv
         return await ReadSingleAsync(reader, ct);
     }
 
-    public async Task<Reservation?> GetByIdAsync(Guid reservationId, CancellationToken ct)
+    private async Task<Reservation?> QueryByIdAsync(Guid reservationId, CancellationToken ct)
     {
         await using var command = dataSources.Main.CreateCommand(ByIdSql);
         command.Parameters.Add(Uuid(reservationId));
@@ -32,7 +48,7 @@ public sealed class ReservationReadRepository(DataSources dataSources) : IReserv
     /// Both selects in one <see cref="NpgsqlBatch"/>, so one round trip (D-088). Outside a transaction each statement
     /// sees its own snapshot. That's fine: the fast path only ever declines, and the locked path re-checks everything.
     /// </summary>
-    public async Task<FastPathSnapshot> GetFastPathSnapshotAsync(
+    private async Task<FastPathSnapshot> QueryFastPathAsync(
         string userId,
         string idempotencyKey,
         Guid showId,

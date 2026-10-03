@@ -11,7 +11,7 @@ namespace SeatReservation.IntegrationTests.Persistence;
 [Collection(PostgresCollection.Name)]
 public class TransactionRunnerTests(PostgresFixture postgres)
 {
-    private static PgTransactionRunner RunnerFor(MigratedDatabase db) => new(db.Sources, NullLogger<PgTransactionRunner>.Instance);
+    private static PgTransactionRunner RunnerFor(MigratedDatabase db) => new(db.Sources, db.Metrics, NullLogger<PgTransactionRunner>.Instance);
 
     private static NpgsqlCommand Command(IUnitOfWork uow, string sql)
     {

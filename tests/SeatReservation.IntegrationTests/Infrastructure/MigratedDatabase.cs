@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Npgsql;
 using SeatReservation.Infrastructure.Migrations;
 using SeatReservation.Infrastructure.Persistence;
+using SeatReservation.Infrastructure.Transactions;
 
 namespace SeatReservation.IntegrationTests.Infrastructure;
 
@@ -18,6 +19,9 @@ public sealed class MigratedDatabase : IAsyncDisposable
     public string ConnectionString { get; }
 
     public DataSources Sources { get; }
+
+    /// <summary>One metrics instance per database, for repositories and runners the tests build by hand.</summary>
+    public DbMetrics Metrics { get; } = TestMetrics.NewDb();
 
     public static async Task<MigratedDatabase> CreateAsync(PostgresFixture postgres, DatabaseOptions? options = null)
     {

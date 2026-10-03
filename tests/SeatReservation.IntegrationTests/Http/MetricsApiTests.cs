@@ -56,6 +56,20 @@ public class MetricsApiTests(ApiFixture api) : IClassFixture<ApiFixture>
             after.Named("reservation_duration_seconds_count").Select(s => s.Labels["outcome"]).Order(StringComparer.Ordinal));
     }
 
+    [Fact]
+    public async Task Db_up_follows_the_readiness_probe()
+    {
+        Assert.Equal(HttpStatusCode.OK, (await api.Client.GetAsync("/health/ready")).StatusCode);
+        Assert.Equal(1, (await MetricsScrape.FetchAsync(api.Client)).Value("db_up"));
+
+        await using var down = new ApiFactory(ApiFactory.UnreachableConnectionString);
+        using var client = down.CreateClient();
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/health/ready")).StatusCode);
+        var scrape = await MetricsScrape.FetchAsync(client);   // the scrape itself still answers 200
+        Assert.Equal(0, scrape.Value("db_up"));
+        Assert.Equal(1, scrape.Value("seats_gauge_stale"));
+    }
+
     private static double Delta(MetricsScrape before, MetricsScrape after, string name, params (string Label, string Value)[] labels) =>
         after.Value(name, labels) - before.Value(name, labels);
 }

@@ -71,7 +71,7 @@ public class ErrorTranslationTests(PostgresFixture postgres)
     {
         var options = new DatabaseOptions { MaxPoolSize = 2, OpsPoolSize = 1, ConnectionTimeoutSeconds = 3 };
         await using var sources = DataSources.Create(ApiFactory.UnreachableConnectionString, options, includeErrorDetail: false);
-        var runner = new PgTransactionRunner(sources, NullLogger<PgTransactionRunner>.Instance);
+        var runner = new PgTransactionRunner(sources, TestMetrics.NewDb(), NullLogger<PgTransactionRunner>.Instance);
         var ran = false;
 
         var ex = await Assert.ThrowsAsync<DependencyUnavailableException>(() => runner.RunAsync<int>("reserve", (uow, ct) =>
@@ -91,7 +91,7 @@ public class ErrorTranslationTests(PostgresFixture postgres)
     {
         var options = new DatabaseOptions { MaxPoolSize = 1, OpsPoolSize = 1, ConnectionTimeoutSeconds = 1 };
         await using var db = await MigratedDatabase.CreateAsync(postgres, options);
-        var runner = new PgTransactionRunner(db.Sources, NullLogger<PgTransactionRunner>.Instance);
+        var runner = new PgTransactionRunner(db.Sources, db.Metrics, NullLogger<PgTransactionRunner>.Instance);
         await using var hog = await db.Sources.Main.OpenConnectionAsync();   // takes the only main-pool connection
 
         var ex = await Assert.ThrowsAsync<DependencyUnavailableException>(() => runner.RunAsync("test",
@@ -110,7 +110,7 @@ public class ErrorTranslationTests(PostgresFixture postgres)
         var attempts = 0;
 
         var ex = await Assert.ThrowsAsync<DuplicateIdempotencyKeyException>(() =>
-            new PgTransactionRunner(db.Sources, NullLogger<PgTransactionRunner>.Instance).RunAsync<int>("reserve", async (uow, ct) =>
+            new PgTransactionRunner(db.Sources, db.Metrics, NullLogger<PgTransactionRunner>.Instance).RunAsync<int>("reserve", async (uow, ct) =>
             {
                 attempts++;
                 var pg = (PgUnitOfWork)uow;
@@ -131,7 +131,7 @@ public class ErrorTranslationTests(PostgresFixture postgres)
         var original = new DuplicateIdempotencyKeyException();
 
         var thrown = await Assert.ThrowsAsync<DuplicateIdempotencyKeyException>(() =>
-            new PgTransactionRunner(db.Sources, NullLogger<PgTransactionRunner>.Instance)
+            new PgTransactionRunner(db.Sources, db.Metrics, NullLogger<PgTransactionRunner>.Instance)
                 .RunAsync<int>("reserve", (uow, ct) => throw original, CancellationToken.None));
 
         Assert.Same(original, thrown);
@@ -144,7 +144,7 @@ public class ErrorTranslationTests(PostgresFixture postgres)
         var attempts = 0;
 
         var ex = await Assert.ThrowsAsync<PostgresException>(() =>
-            new PgTransactionRunner(db.Sources, NullLogger<PgTransactionRunner>.Instance).RunAsync<int>("test", async (uow, ct) =>
+            new PgTransactionRunner(db.Sources, db.Metrics, NullLogger<PgTransactionRunner>.Instance).RunAsync<int>("test", async (uow, ct) =>
             {
                 attempts++;
                 var pg = (PgUnitOfWork)uow;

@@ -1,4 +1,5 @@
 using System.Data;
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using SeatReservation.Application.Abstractions;
@@ -13,7 +14,7 @@ namespace SeatReservation.Infrastructure.Transactions;
 /// if the database stays unreachable or keeps failing transiently the caller gets a
 /// <see cref="DependencyUnavailableException"/>. Anything else is a bug and is rethrown untouched, with the transaction rolled back.
 /// </summary>
-public sealed class PgTransactionRunner(DataSources dataSources, ILogger<PgTransactionRunner> logger) : ITransactionRunner
+public sealed class PgTransactionRunner(DataSources dataSources, DbMetrics metrics, ILogger<PgTransactionRunner> logger) : ITransactionRunner
 {
     public const int MaxAttempts = 3;
 
@@ -24,15 +25,18 @@ public sealed class PgTransactionRunner(DataSources dataSources, ILogger<PgTrans
 
         for (var attempt = 1; ; attempt++)
         {
+            var started = Stopwatch.GetTimestamp();
             try
             {
                 return await RunOnceAsync(work, ct);
             }
             catch (Exception ex)
             {
+                metrics.Failed(operation, ex);
                 switch (PgErrorClassifier.Classify(ex))
                 {
                     case DbErrorKind.Transient or DbErrorKind.Unavailable when attempt < AttemptLimit(ex):
+                        metrics.Retried(operation);
                         logger.LogWarning("db.retry operation={Operation} attempt={Attempt} error={Error}", operation, attempt, Describe(ex));
                         await Task.Delay(Backoff(attempt), ct);
                         continue;
@@ -47,6 +51,10 @@ public sealed class PgTransactionRunner(DataSources dataSources, ILogger<PgTrans
                     default:
                         throw;   // cancellation, application exceptions from the delegate, and bugs pass through unchanged
                 }
+            }
+            finally
+            {
+                metrics.ObserveDuration(operation, Stopwatch.GetElapsedTime(started));   // per attempt
             }
         }
     }

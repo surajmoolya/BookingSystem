@@ -30,6 +30,8 @@ public static class DependencyInjection
             sp.GetRequiredService<IOptions<DatabaseOptions>>().Value,
             includeErrorDetail: sp.GetRequiredService<IHostEnvironment>().IsDevelopment()));
 
+        // Needs an IMetricFactory from the composition root (the host's Prometheus registry, D-097).
+        services.TryAddSingleton<DbMetrics>();
         services.TryAddSingleton<ITransactionRunner, PgTransactionRunner>();
         services.TryAddSingleton<IShowReadRepository, ShowReadRepository>();
         services.TryAddSingleton<IReservationReadRepository, ReservationReadRepository>();

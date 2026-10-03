@@ -29,5 +29,31 @@ services:
       db:
         condition: service_healthy
 
+  # Optional local dashboards (T-5.12): docker compose --profile observability up --build
+  # Prometheus on http://localhost:9090, Grafana on http://localhost:3000 (anonymous viewer, dashboard "Seat Reservation").
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v2.54.1
+    volumes:
+      - ./ops/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api
+
+  grafana:
+    profiles: [observability]
+    image: grafana/grafana:11.2.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/seat-reservation.json
+    volumes:
+      - ./ops/grafana:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
 volumes:
   pgdata: {}

@@ -14,9 +14,12 @@ public sealed class Scenarios(ServiceClient client, BurstOptions options)
     // Usernames are unique per run: keys and limits are per user (D-031), so a rerun must not collide with the last one.
     private readonly string _run = Guid.NewGuid().ToString("N")[..6];
 
+    // Every show this run created, for the final reconciliation (lld §12 #7).
+    private readonly List<Guid> _shows = [];
+
     public async Task<(ScenarioResult Result, List<string> Lines)> HotSeatAsync()
     {
-        var showId = await client.CreateShowAsync($"burst-hot-{_run}", Enumerable.Range(1, 10).Select(i => $"A{i}").ToArray(), PerUserLimit);
+        var showId = await CreateShowAsync($"burst-hot-{_run}", Enumerable.Range(1, 10).Select(i => $"A{i}").ToArray(), PerUserLimit);
         var users = Enumerable.Range(0, options.HotUsers).Select(i => $"b{_run}-h{i}").ToArray();
         var (tokens, minted) = await MintAsync(users);
 
@@ -50,7 +53,7 @@ public sealed class Scenarios(ServiceClient client, BurstOptions options)
     /// </summary>
     public async Task<(ScenarioResult Result, List<string> Lines)> IdempotentRetriesAsync()
     {
-        var showId = await client.CreateShowAsync($"burst-idem-{_run}", ["X1", "X2", "X3"], PerUserLimit);
+        var showId = await CreateShowAsync($"burst-idem-{_run}", ["X1", "X2", "X3"], PerUserLimit);
         var user = $"b{_run}-idem";
         var (tokens, minted) = await MintAsync([user]);
         var key = $"idem-{_run}";
@@ -96,7 +99,7 @@ public sealed class Scenarios(ServiceClient client, BurstOptions options)
     /// </summary>
     public async Task<(ScenarioResult Result, List<string> Lines)> KeyConflictAsync()
     {
-        var showId = await client.CreateShowAsync($"burst-conflict-{_run}", ["X", "Y", "Z"], PerUserLimit);
+        var showId = await CreateShowAsync($"burst-conflict-{_run}", ["X", "Y", "Z"], PerUserLimit);
         var user = $"b{_run}-conflict";
         var (tokens, minted) = await MintAsync([user]);
         var key = $"conflict-{_run}";
@@ -160,7 +163,7 @@ public sealed class Scenarios(ServiceClient client, BurstOptions options)
         foreach (var limit in new[] { 4, 2 })
         {
             var labels = Enumerable.Range(1, options.LimitRequests).Select(i => $"L{i}").ToArray();
-            var showId = await client.CreateShowAsync($"burst-limit{limit}-{_run}", labels, limit);
+            var showId = await CreateShowAsync($"burst-limit{limit}-{_run}", labels, limit);
 
             var stopwatch = Stopwatch.StartNew();
             var outcomes = await StartGate.RunAsync(labels.Length, i =>
@@ -193,7 +196,7 @@ public sealed class Scenarios(ServiceClient client, BurstOptions options)
         var labels = Enumerable.Range(1, options.MixedSeats).Select(i => $"S{i}").ToArray();
         var hot = labels[..HotSeatCount];
         var cold = labels[HotSeatCount..];
-        var showId = await client.CreateShowAsync($"burst-mixed-{_run}", labels, PerUserLimit);
+        var showId = await CreateShowAsync($"burst-mixed-{_run}", labels, PerUserLimit);
         var users = Enumerable.Range(0, options.MixedUsers).Select(i => $"b{_run}-m{i}").ToArray();
         var (tokens, minted) = await MintAsync(users);
 
@@ -272,6 +275,108 @@ public sealed class Scenarios(ServiceClient client, BurstOptions options)
             $"show {showId}",
         };
         return (new ScenarioResult("mixed", $"mixed storm: {requests.Length} requests, {users.Length} users, {labels.Length} seats", outcomes, failures, stopwatch.Elapsed), lines);
+    }
+
+    /// <summary>
+    /// lld §12 #6: A reserves Z; B cancels A's reservation → 403; A cancels → 200; C reserves Z → 201; A cancels again
+    /// → 200 (idempotent) and Z is still confirmed, now C's. A stale repeat cancel must never free someone else's seat.
+    /// </summary>
+    public async Task<(ScenarioResult Result, List<string> Lines)> CancelRebookAsync()
+    {
+        var showId = await CreateShowAsync($"burst-cancel-{_run}", ["Z", "W"], PerUserLimit);
+        string[] users = [$"b{_run}-cancel-a", $"b{_run}-cancel-b", $"b{_run}-cancel-c"];
+        var (tokens, minted) = await MintAsync(users);
+        var (a, b, c) = (0, 1, 2);
+        var failures = new List<string>();
+        var stopwatch = Stopwatch.StartNew();
+
+        var reserveA = await client.ReserveAsync(showId, users[a], tokens[a], ["Z"], $"cancel-a-{_run}", KeyPlacement.Header);
+        Expect(failures, reserveA is { Status: 201, ReservationId: not null }, $"A reserves Z: expected 201, got {reserveA.Bucket}");
+        var idA = reserveA.ReservationId ?? Guid.Empty;
+
+        var cancelByB = await client.CancelAsync(idA, users[b], tokens[b]);
+        Expect(failures, cancelByB is { Status: 403, Code: "not_owner" }, $"B cancels A's reservation: expected 403 not_owner, got {cancelByB.Bucket}");
+
+        var cancelByA = await client.CancelAsync(idA, users[a], tokens[a]);
+        Expect(failures, cancelByA is { Status: 200, ReservationStatus: "cancelled" }, $"A cancels: expected 200 cancelled, got {cancelByA.Bucket} {cancelByA.ReservationStatus}");
+
+        var reserveC = await client.ReserveAsync(showId, users[c], tokens[c], ["Z"], $"cancel-c-{_run}", KeyPlacement.Body);
+        Expect(failures, reserveC is { Status: 201, ReservationId: not null }, $"C reserves the freed Z: expected 201, got {reserveC.Bucket}");
+
+        var staleCancel = await client.CancelAsync(idA, users[a], tokens[a]);
+        Expect(failures, staleCancel is { Status: 200, ReservationStatus: "cancelled" }, $"A cancels again: expected 200 cancelled, got {staleCancel.Bucket} {staleCancel.ReservationStatus}");
+        stopwatch.Stop();
+
+        Outcome[] outcomes = [reserveA, cancelByB, cancelByA, reserveC, staleCancel];
+        GateZero5xx(failures, outcomes);
+
+        var ofC = reserveC.ReservationId is { } idC ? await client.GetReservationAsync(idC, users[c], tokens[c]) : null;
+        Expect(failures, ofC is { Status: 200, ReservationStatus: "confirmed" } && ofC.Seats.SequenceEqual(["Z"]),
+            $"C's reservation should still be confirmed for [Z]; got {ofC?.Bucket} {ofC?.ReservationStatus}");
+        var show = await client.GetShowAsync(showId);
+        Expect(failures, show.Reconciles, $"show doesn't reconcile: {show.Available}+{show.Held}+{show.Confirmed} != {show.Total}");
+        Expect(failures, show.Confirmed == 1 && show.SeatStatus.GetValueOrDefault("Z") == "confirmed",
+            $"Z should be the only confirmed seat; confirmed={show.Confirmed}, Z={show.SeatStatus.GetValueOrDefault("Z")}");
+
+        var lines = new List<string>
+        {
+            minted,
+            $"A reserve {reserveA.Bucket} -> B cancel {cancelByB.Bucket} -> A cancel {cancelByA.Bucket} -> C reserve {reserveC.Bucket} -> A cancel again {staleCancel.Bucket}",
+            $"Z owned by C: {ofC?.ReservationStatus ?? "unknown"} ({reserveC.ReservationId})",
+            $"reconciliation: {show.Available}+{show.Held}+{show.Confirmed} == {show.Total}",
+            $"show {showId}",
+        };
+        return (new ScenarioResult("cancel", "cancel/rebook: A reserves Z, B can't cancel it, A cancels, C rebooks", outcomes, failures, stopwatch.Elapsed), lines);
+    }
+
+    /// <summary>
+    /// lld §12 #7: every show this run created reconciles (<c>available+held+confirmed==total</c>), and once the 1 s gauge
+    /// cache has expired, <c>show_seats{show_id,state}</c> and <c>show_seats_total</c> on <c>/metrics</c> equal
+    /// <c>GET /shows/{id}</c> for each of them (D-086). Also prints the server's own counters.
+    /// </summary>
+    public async Task<(ScenarioResult Result, List<string> Lines)> FinalReconciliationAsync()
+    {
+        var failures = new List<string>();
+        var lines = new List<string>();
+        var stopwatch = Stopwatch.StartNew();
+        await Task.Delay(TimeSpan.FromSeconds(1.5));   // the seat gauges cache for 1 s (Metrics:SeatGaugeCacheSeconds)
+
+        var states = new Dictionary<Guid, ShowState>();
+        foreach (var showId in _shows)
+        {
+            states[showId] = await client.GetShowAsync(showId);
+        }
+
+        var metrics = await client.GetMetricsAsync();
+        var matching = 0;
+        foreach (var (showId, show) in states)
+        {
+            Expect(failures, show.Reconciles, $"show {showId} doesn't reconcile: {show.Available}+{show.Held}+{show.Confirmed} != {show.Total}");
+
+            var id = showId.ToString();
+            double? Gauge(string state) => metrics.Value("show_seats", ("show_id", id), ("state", state));
+            var (available, held, confirmed, total) = (Gauge("available"), Gauge("held"), Gauge("confirmed"), metrics.Value("show_seats_total", ("show_id", id)));
+            var match = available == show.Available && held == show.Held && confirmed == show.Confirmed && total == show.Total;
+            matching += match ? 1 : 0;
+            Expect(failures, match,
+                $"show {showId}: gauges available/held/confirmed/total {available}/{held}/{confirmed}/{total} != API {show.Available}/{show.Held}/{show.Confirmed}/{show.Total}");
+            lines.Add($"show_seats {id}: {available}/{held}/{confirmed} of {total}   API {show.Available}/{show.Held}/{show.Confirmed} of {show.Total}   {(match ? "OK" : "MISMATCH")}");
+        }
+
+        stopwatch.Stop();
+        var declined = metrics.By("reservations_declined_total", "reason");
+        lines.Add($"per-show gauges vs API: {matching}/{states.Count} shows match");
+        lines.Add($"server metrics: reservations_confirmed_total={metrics.Value("reservations_confirmed_total") ?? 0} " +
+                  $"reservations_cancelled_total={metrics.Value("reservations_cancelled_total") ?? 0} seats_available={metrics.Value("seats_available") ?? 0}");
+        lines.Add($"server declines: {(declined.Count == 0 ? "none" : string.Join("  ", declined.OrderBy(d => d.Key, StringComparer.Ordinal).Select(d => $"{d.Key}={d.Value}")))}");
+        return (new ScenarioResult("final", $"final reconciliation: {states.Count} shows, /metrics vs GET /shows/{{id}}", [], failures, stopwatch.Elapsed), lines);
+    }
+
+    private async Task<Guid> CreateShowAsync(string name, IReadOnlyList<string> seats, int perUserLimit)
+    {
+        var showId = await client.CreateShowAsync(name, seats, perUserLimit);
+        _shows.Add(showId);
+        return showId;
     }
 
     private async Task<(string[] Tokens, string Line)> MintAsync(IReadOnlyList<string> users)

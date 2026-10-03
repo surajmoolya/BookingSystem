@@ -19,7 +19,8 @@ public sealed record Outcome(
     bool Replayed,
     double LatencyMs,
     string? TransportError,
-    string UserId)
+    string UserId,
+    string? ReservationStatus = null)
 {
     public bool IsTransportError => Status == 0;
 
@@ -162,6 +163,34 @@ public sealed class ServiceClient : IDisposable
             request.Headers.Add("Idempotency-Key", headerKey);
         }
 
+        return await SendAsync(request, userId);
+    }
+
+    /// <summary><c>POST /reservations/{id}/cancel</c> as <paramref name="userId"/>; recorded like a reserve, never throws.</summary>
+    public async Task<Outcome> CancelAsync(Guid reservationId, string userId, string token)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/reservations/{reservationId}/cancel");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return await SendAsync(request, userId);
+    }
+
+    /// <summary><c>GET /reservations/{id}</c> as <paramref name="userId"/> (owner only).</summary>
+    public async Task<Outcome> GetReservationAsync(Guid reservationId, string userId, string token)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/reservations/{reservationId}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return await SendAsync(request, userId);
+    }
+
+    /// <summary>The service's <c>/metrics</c>, for the final per-show gauge check (D-086).</summary>
+    public async Task<MetricsText> GetMetricsAsync()
+    {
+        using var cts = new CancellationTokenSource(_options.Timeout);
+        return MetricsText.Parse(await _http.GetStringAsync("/metrics", cts.Token));
+    }
+
+    private async Task<Outcome> SendAsync(HttpRequestMessage request, string userId)
+    {
         var started = Stopwatch.GetTimestamp();
         using var cts = new CancellationTokenSource(_options.Timeout);
         try
@@ -190,6 +219,7 @@ public sealed class ServiceClient : IDisposable
     {
         string? code = null;
         Guid? id = null;
+        string? reservationStatus = null;
         string[] seats = [];
         try
         {
@@ -198,6 +228,8 @@ public sealed class ServiceClient : IDisposable
             {
                 code = json.TryGetProperty("code", out var c) ? c.GetString() : null;
                 id = json.TryGetProperty("reservation_id", out var r) && r.ValueKind == JsonValueKind.String ? r.GetGuid() : null;
+                // A reservation's "status" is a string; a problem's is the HTTP status number.
+                reservationStatus = json.TryGetProperty("status", out var st) && st.ValueKind == JsonValueKind.String ? st.GetString() : null;
                 seats = json.TryGetProperty("seats", out var s) && s.ValueKind == JsonValueKind.Array
                     ? s.EnumerateArray().Select(e => e.GetString()!).ToArray()
                     : [];
@@ -209,7 +241,7 @@ public sealed class ServiceClient : IDisposable
         }
 
         var replayed = headers.TryGetValues("Idempotent-Replayed", out var values) && values.FirstOrDefault() == "true";
-        return new Outcome(status, code, id, seats, replayed, latency, null, userId);
+        return new Outcome(status, code, id, seats, replayed, latency, null, userId, reservationStatus);
     }
 
     public void Dispose() => _http.Dispose();

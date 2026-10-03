@@ -6,7 +6,7 @@ public enum KeyPlacement
     Body,
 }
 
-/// <summary>Command-line options (lld §12). Scenarios not built yet are rejected by name rather than silently skipped.</summary>
+/// <summary>Command-line options (lld §12).</summary>
 public sealed record BurstOptions(
     Uri BaseUrl,
     IReadOnlyList<string> Scenarios,
@@ -22,10 +22,8 @@ public sealed record BurstOptions(
     string KeyIn,
     string? JsonPath)
 {
-    public static readonly string[] Implemented = ["hot", "idem", "conflict", "limit", "mixed"];
-
-    /// <summary>The rest of lld §12's scenarios arrive with M7.</summary>
-    public static readonly string[] Planned = ["cancel"];
+    /// <summary>lld §12 order; <c>--scenario all</c> runs them in this order, then the final reconciliation.</summary>
+    public static readonly string[] Implemented = ["hot", "idem", "conflict", "limit", "mixed", "cancel"];
 
     /// <summary>Concurrent <c>POST /auth/token</c> calls while minting, before any timed window.</summary>
     public const int MintParallelism = 32;
@@ -82,9 +80,7 @@ public sealed record BurstOptions(
             : values["scenario"].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (scenarios.FirstOrDefault(s => !Implemented.Contains(s)) is { } missing)
         {
-            error = Planned.Contains(missing)
-                ? $"Scenario '{missing}' is not implemented yet (M7). Available: {string.Join(", ", Implemented)}."
-                : $"Unknown scenario '{missing}'.";
+            error = $"Unknown scenario '{missing}'. Available: {string.Join(", ", Implemented)}.";
             return false;
         }
 

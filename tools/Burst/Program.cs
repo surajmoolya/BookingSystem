@@ -1,5 +1,4 @@
 // Burst: concurrent load and correctness checker for the seat reservation service (lld §12).
-// T-3.15 builds the minimum for the first remote check (hot seat + mixed storm); M7 adds the remaining scenarios.
 
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -11,7 +10,7 @@ const string Usage = """
     Fires concurrent reservation traffic at a running service and checks the results (lld §12).
 
     Options:
-      --scenario <list>        comma-separated: hot,idem,conflict,limit,mixed,cancel (default: all built so far)
+      --scenario <list>        comma-separated: hot,idem,conflict,limit,mixed,cancel (default: all)
       --hot-users <n>          distinct users hitting one seat (default: 500)
       --idem-requests <n>      concurrent same-key requests (default: 200)
       --limit-requests <n>     one user, distinct seats (default: 50)
@@ -26,7 +25,8 @@ const string Usage = """
       -h, --help               show this help
 
     Tokens are minted up front via POST /auth/token, at most 32 in flight, outside the timed window.
-    Exit code: 0 if every scenario passes, 1 otherwise.
+    After the scenarios, every show the run created is reconciled against GET /shows/{id} and /metrics.
+    Exit code: 0 if every scenario, the reconciliation and the zero-5xx gate pass; 1 otherwise.
     """;
 
 if (args.Length == 0 || args.Any(a => a is "-h" or "--help"))
@@ -60,12 +60,17 @@ foreach (var name in options.Scenarios)
         "idem" => await scenarios.IdempotentRetriesAsync(),
         "conflict" => await scenarios.KeyConflictAsync(),
         "limit" => await scenarios.PerUserLimitAsync(),
+        "cancel" => await scenarios.CancelRebookAsync(),
         "mixed" => await scenarios.MixedStormAsync(),
         _ => throw new InvalidOperationException($"Scenario '{name}' is not wired."),
     };
-    Report.Scenario(result, lines);
-    results.Add(result);
+    results.Add(result with { Notes = lines });
+    Report.Scenario(results[^1]);
 }
+
+var (final, finalLines) = await scenarios.FinalReconciliationAsync();
+results.Add(final with { Notes = finalLines });
+Report.Scenario(results[^1]);
 
 Report.Totals(results);
 
@@ -74,4 +79,4 @@ if (options.JsonPath is { } path)
     await File.WriteAllTextAsync(path, JsonSerializer.Serialize(Report.Json(options.BaseUrl, results), new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
 }
 
-return results.All(r => r.Pass) ? 0 : 1;
+return Report.Pass(results) ? 0 : 1;

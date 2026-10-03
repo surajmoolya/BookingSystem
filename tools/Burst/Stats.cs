@@ -8,6 +8,8 @@ public enum OutcomeClass
     SeatTaken,
     PerUserLimit,
     KeyConflict,
+    NotOwner,
+    Cancelled,
     Other2xx,
     Other4xx,
     ServerError,
@@ -28,10 +30,12 @@ public static class Stats
         { Is5xx: true } => OutcomeClass.ServerError,
         { Status: 201 } => OutcomeClass.Confirmed,
         { Status: 200, Replayed: true } => OutcomeClass.Replayed,
+        { Status: 200, ReservationStatus: "cancelled" } => OutcomeClass.Cancelled,
         { Status: >= 200 and < 300 } => OutcomeClass.Other2xx,
         { Status: 409, Code: "seat_taken" } => OutcomeClass.SeatTaken,
         { Status: 409, Code: "per_user_limit" } => OutcomeClass.PerUserLimit,
         { Status: 409, Code: "idempotency_key_conflict" } => OutcomeClass.KeyConflict,
+        { Status: 403, Code: "not_owner" } => OutcomeClass.NotOwner,
         _ => OutcomeClass.Other4xx,   // 4xx, plus anything odd (1xx/3xx) that a client would still have to handle
     };
 
@@ -70,6 +74,8 @@ public static class Stats
         OutcomeClass.SeatTaken => "seat_taken",
         OutcomeClass.PerUserLimit => "per_user_limit",
         OutcomeClass.KeyConflict => "idempotency_key_conflict",
+        OutcomeClass.NotOwner => "not_owner",
+        OutcomeClass.Cancelled => "cancelled",
         OutcomeClass.Other2xx => "other_2xx",
         OutcomeClass.Other4xx => "other_4xx",
         OutcomeClass.ServerError => "5xx",

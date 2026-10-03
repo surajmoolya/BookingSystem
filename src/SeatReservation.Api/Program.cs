@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using SeatReservation.Api.Admission;
 using SeatReservation.Api.Auth;
 using SeatReservation.Api.Errors;
 using SeatReservation.Api.Health;
@@ -43,6 +44,7 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddValidatedOptions(builder.Configuration);
 builder.Services.AddJwtAuth();
 builder.Services.AddReadinessChecks();
+builder.Services.AddAdmissionControl();
 builder.Services.AddHostedService<ShutdownDrain>();
 
 var app = builder.Build();
@@ -54,6 +56,7 @@ app.UseRouting();
 app.UseRouteTemplateHttpMetrics();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();   // after auth: a 401 never takes a queue slot
 app.MapControllers();
 app.MapHealthEndpoints();
 app.MapHostMetrics();

@@ -18,6 +18,7 @@ public class MetricsApiTests(ApiFixture api) : IClassFixture<ApiFixture>
         "reservation_duration_seconds",
         "show_seats", "show_seats_total", "seats_available", "seats_held", "seats_confirmed", "seats_total", "seats_gauge_stale",
         "db_up", "db_query_duration_seconds", "db_errors_total", "db_transaction_retries_total",
+        "reservation_queue_length",
     ];
 
     private static readonly string[] DeclineReasons =
@@ -43,6 +44,28 @@ public class MetricsApiTests(ApiFixture api) : IClassFixture<ApiFixture>
         // No series carries an id (the per-show seat gauges are the one exception, D-086).
         Assert.DoesNotContain(scrape.Samples.Where(s => !s.Name.StartsWith("show_seats", StringComparison.Ordinal)), s => s.Labels.Values.Any(v => v.Contains(showId.ToString(), StringComparison.OrdinalIgnoreCase)));
         Assert.All(scrape.Named("http_requests_received_total"), s => Assert.Equal(["code", "endpoint", "method"], s.Labels.Keys.Order(StringComparer.Ordinal)));
+    }
+
+    [Fact]
+    public async Task Queue_length_counts_requests_waiting_for_a_db_permit()
+    {
+        // Own host with 1 permit (the class fixture's host keeps the default): one request holds it, one waits.
+        var gate = new AdmissionGate();
+        await using var factory = AdmissionApiTests.NewFactory(gate);
+        using var client = factory.CreateClient();
+        Assert.Equal(0, (await MetricsScrape.FetchAsync(client)).Value("reservation_queue_length"));
+
+        var held = client.GetAsync("/_probe/admission/hold");
+        Assert.True(await gate.WaitEnteredAsync());
+        var queued = client.GetAsync("/_probe/admission/hold");
+        await AdmissionApiTests.WaitForAsync(() => factory.Services.GetRequiredService<SeatReservation.Api.Admission.DbAdmissionLimiter>().QueuedCount == 1);
+
+        Assert.Equal(1, (await MetricsScrape.FetchAsync(client)).Value("reservation_queue_length"));
+
+        gate.Release();
+        (await held).Dispose();
+        (await queued).Dispose();
+        Assert.Equal(0, (await MetricsScrape.FetchAsync(client)).Value("reservation_queue_length"));
     }
 
     [Fact]

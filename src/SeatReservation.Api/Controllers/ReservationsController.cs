@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using SeatReservation.Api.Admission;
 using SeatReservation.Api.Auth;
 using SeatReservation.Api.Mapping;
 using SeatReservation.Api.Observability;
@@ -13,6 +15,7 @@ namespace SeatReservation.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("reservations")]
+[EnableRateLimiting(AdmissionControl.DbPolicy)]
 [Authorize]
 public sealed class ReservationsController(
     ReservationService reservations,

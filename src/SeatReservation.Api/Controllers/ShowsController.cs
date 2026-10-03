@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using SeatReservation.Api.Admission;
 using SeatReservation.Api.Auth;
 using SeatReservation.Api.Contracts.Requests;
 using SeatReservation.Api.Mapping;
@@ -11,6 +13,7 @@ namespace SeatReservation.Api.Controllers;
 
 [ApiController]
 [Route("shows")]
+[EnableRateLimiting(AdmissionControl.DbPolicy)]
 public sealed class ShowsController(ShowService shows, ReservationService reservations, IHostApplicationLifetime lifetime) : ControllerBase
 {
     /// <summary>A 10,000-seat show with 16-character labels is ~190 KB of JSON, above the global 64 KB body limit (T-6.7).</summary>

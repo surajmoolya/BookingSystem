@@ -33,6 +33,7 @@ public static class HttpMetricsSetup
         services.AddSingleton<IMetricFactory>(Metrics.WithCustomRegistry(registry));
         services.AddSingleton<SeatGaugeCollector>();
         services.AddSingleton<NpgsqlPoolMetrics>();
+        services.AddSingleton<AdmissionQueueGauge>();
         return services;
     }
 
@@ -60,12 +61,13 @@ public static class HttpMetricsSetup
 
     /// <summary>
     /// Maps <c>GET /metrics</c> onto the host's registry (anonymous, outside any rate limit), and creates the seat gauge
-    /// collector (its constructor hooks its refresh into every scrape) and the Npgsql pool bridge.
+    /// collector (its constructor hooks its refresh into every scrape), the Npgsql pool bridge and the admission queue gauge.
     /// </summary>
     public static IEndpointConventionBuilder MapHostMetrics(this IEndpointRouteBuilder endpoints)
     {
         _ = endpoints.ServiceProvider.GetRequiredService<SeatGaugeCollector>();
         _ = endpoints.ServiceProvider.GetRequiredService<NpgsqlPoolMetrics>();
+        _ = endpoints.ServiceProvider.GetRequiredService<AdmissionQueueGauge>();
         return endpoints.MapMetrics("/metrics", endpoints.ServiceProvider.GetRequiredService<CollectorRegistry>())
             .AllowAnonymous();
     }

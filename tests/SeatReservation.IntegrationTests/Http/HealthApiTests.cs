@@ -12,7 +12,7 @@ using SeatReservation.IntegrationTests.Infrastructure;
 namespace SeatReservation.IntegrationTests.Http;
 
 /// <summary>
-/// <c>/health/ready</c> (T-1.13): 200 only when the database answers <c>SELECT 1</c> on the ops pool and migrations are done;
+/// <c>/health/ready</c> (T-1.13, T-6.2/T-6.3): 200 only when the database answers <c>SELECT 1</c> on the ops pool and migrations are done;
 /// otherwise 503. Liveness never follows the database.
 /// </summary>
 [Collection(PostgresCollection.Name)]
@@ -29,6 +29,19 @@ public sealed class HealthApiTests(PostgresFixture postgres)
             [DatabaseHealthCheck.Name, MigrationsHealthCheck.Name],
             registrations.Where(r => r.Tags.Contains("ready")).Select(r => r.Name).Order());
     }
+    [Fact]
+    public async Task Live_200_with_db()
+    {
+        await using var factory = await ApiFactory.StartAsync(postgres);
+        using var client = factory.CreateClient();
+
+        using var response = await client.GetAsync("/health/live");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("live", body.RootElement.GetProperty("status").GetString());
+    }
+
     [Fact]
     public async Task Ready_200_with_db()
     {

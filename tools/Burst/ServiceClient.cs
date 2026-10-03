@@ -143,17 +143,23 @@ public sealed class ServiceClient : IDisposable
     }
 
     /// <summary>Prepares nothing lazily: the caller builds every request before the start gate opens.</summary>
-    public async Task<Outcome> ReserveAsync(Guid showId, string userId, string token, string[] seats, string key, KeyPlacement placement)
+    public Task<Outcome> ReserveAsync(Guid showId, string userId, string token, string[] seats, string key, KeyPlacement placement) =>
+        ReserveAsync(showId, userId, token, seats,
+            headerKey: placement == KeyPlacement.Header ? key : null,
+            bodyKey: placement == KeyPlacement.Body ? key : null);
+
+    /// <summary>Full control over both key sources (D-084), e.g. a header/body mismatch probe. A null key is left out.</summary>
+    public async Task<Outcome> ReserveAsync(Guid showId, string userId, string token, string[] seats, string? headerKey, string? bodyKey)
     {
-        object body = placement == KeyPlacement.Body ? new { seats, idempotency_key = key } : new { seats };
+        object body = bodyKey is null ? new { seats } : new { seats, idempotency_key = bodyKey };
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/shows/{showId}/reserve")
         {
             Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"),
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        if (placement == KeyPlacement.Header)
+        if (headerKey is not null)
         {
-            request.Headers.Add("Idempotency-Key", key);
+            request.Headers.Add("Idempotency-Key", headerKey);
         }
 
         var started = Stopwatch.GetTimestamp();

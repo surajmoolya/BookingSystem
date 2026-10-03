@@ -3,7 +3,7 @@ using System.Diagnostics;
 namespace Burst;
 
 /// <summary>
-/// The lld §12 scenarios built so far (T-3.15): the hot seat and the mixed storm. Each creates its own show, mints its
+/// The lld §12 scenarios. Each creates its own show, mints its
 /// tokens before the timed window, and releases every request through <see cref="StartGate"/>.
 /// </summary>
 public sealed class Scenarios(ServiceClient client, BurstOptions options)
@@ -42,6 +42,106 @@ public sealed class Scenarios(ServiceClient client, BurstOptions options)
 
         var lines = new List<string> { minted, $"winner: {winner?.UserId ?? "none"} ({winner?.ReservationId})", $"reconciliation: {show.Available}+{show.Held}+{show.Confirmed} == {show.Total}", $"show {showId}" };
         return (new ScenarioResult("hot", $"hot-seat storm: {users.Length} users -> A1", outcomes, failures, stopwatch.Elapsed), lines);
+    }
+
+    /// <summary>
+    /// lld §12 #2: one user sends the same key and seat <c>idem-requests</c> times at once, the key alternating between the
+    /// header and the body (D-084) whatever <c>--key-in</c> says. Then a header/body mismatch probe must be a 400.
+    /// </summary>
+    public async Task<(ScenarioResult Result, List<string> Lines)> IdempotentRetriesAsync()
+    {
+        var showId = await client.CreateShowAsync($"burst-idem-{_run}", ["X1", "X2", "X3"], PerUserLimit);
+        var user = $"b{_run}-idem";
+        var (tokens, minted) = await MintAsync([user]);
+        var key = $"idem-{_run}";
+
+        var stopwatch = Stopwatch.StartNew();
+        var outcomes = await StartGate.RunAsync(options.IdemRequests, i =>
+            client.ReserveAsync(showId, user, tokens[0], ["X1"], key, i % 2 == 0 ? KeyPlacement.Header : KeyPlacement.Body));
+        stopwatch.Stop();
+
+        var failures = new List<string>();
+        GateZero5xx(failures, outcomes);
+        var created = outcomes.Count(o => o.Status == 201);
+        Expect(failures, created == 1, $"expected exactly 1×201, got {created}");
+        var notReplays = outcomes.Where(o => o.Status != 201 && o is not { Status: 200, Replayed: true }).ToArray();
+        Expect(failures, notReplays.Length == 0, $"every other response should be a 200 replay; got {Describe(notReplays)}");
+        var ids = outcomes.Where(o => o.Status is 200 or 201).Select(o => o.ReservationId).Distinct().ToArray();
+        Expect(failures, ids.Length == 1 && ids[0] is not null, $"2xx responses should share one reservation_id; got {ids.Length} distinct");
+        Expect(failures, outcomes.Where(o => o.Status is 200 or 201).All(o => o.Seats.SequenceEqual(["X1"])), "a 2xx response named seats other than [X1]");
+
+        // The same key in the header and a different one in the body: neither may be picked, it's a 400 (D-084).
+        var probe = await client.ReserveAsync(showId, user, tokens[0], ["X2"], headerKey: key, bodyKey: key + "-other");
+        Expect(failures, probe is { Status: 400, Code: "validation" }, $"header/body key mismatch should be 400 validation; got {probe.Bucket}");
+
+        var show = await client.GetShowAsync(showId);
+        Expect(failures, show.Reconciles, $"show doesn't reconcile: {show.Available}+{show.Held}+{show.Confirmed} != {show.Total}");
+        Expect(failures, show.Confirmed == 1 && show.SeatStatus.GetValueOrDefault("X1") == "confirmed",
+            $"the user should hold exactly X1; confirmed={show.Confirmed}, X1={show.SeatStatus.GetValueOrDefault("X1")}");
+
+        var lines = new List<string>
+        {
+            minted,
+            $"key in header/body: {(options.IdemRequests + 1) / 2}/{options.IdemRequests / 2}   reservation: {ids.FirstOrDefault()}",
+            $"header/body mismatch probe: {probe.Bucket}",
+            $"reconciliation: {show.Available}+{show.Held}+{show.Confirmed} == {show.Total}",
+            $"show {showId}",
+        };
+        return (new ScenarioResult("idem", $"idempotent retries: {options.IdemRequests} × one key -> X1", outcomes, failures, stopwatch.Elapsed), lines);
+    }
+
+    /// <summary>
+    /// lld §12 #3: one user, one key, half the requests for X and half for Y, all at once. Exactly one reservation wins;
+    /// the requests for the other seat get 409 <c>idempotency_key_conflict</c>. Then reusing the key for new seats is a 409 too.
+    /// </summary>
+    public async Task<(ScenarioResult Result, List<string> Lines)> KeyConflictAsync()
+    {
+        var showId = await client.CreateShowAsync($"burst-conflict-{_run}", ["X", "Y", "Z"], PerUserLimit);
+        var user = $"b{_run}-conflict";
+        var (tokens, minted) = await MintAsync([user]);
+        var key = $"conflict-{_run}";
+        static string SeatFor(int i) => i % 2 == 0 ? "X" : "Y";
+
+        var stopwatch = Stopwatch.StartNew();
+        var outcomes = await StartGate.RunAsync(options.IdemRequests, i =>
+            client.ReserveAsync(showId, user, tokens[0], [SeatFor(i)], key, options.KeyPlacementFor(i)));
+        stopwatch.Stop();
+
+        var failures = new List<string>();
+        GateZero5xx(failures, outcomes);
+        var created = outcomes.Where(o => o.Status == 201).ToArray();
+        Expect(failures, created.Length == 1, $"expected exactly 1×201, got {created.Length}");
+        var won = created.FirstOrDefault()?.Seats.FirstOrDefault();
+        var ids = outcomes.Where(o => o.Status is 200 or 201).Select(o => o.ReservationId).Distinct().ToArray();
+        Expect(failures, ids.Length == 1, $"2xx responses should share one reservation_id; got {ids.Length} distinct");
+
+        // Same seat as the winner → created or replayed; the other seat → key conflict. Nothing else.
+        var wrong = outcomes
+            .Where((o, i) => SeatFor(i) == won
+                ? o is not ({ Status: 201 } or { Status: 200, Replayed: true })
+                : o is not { Status: 409, Code: "idempotency_key_conflict" })
+            .ToArray();
+        Expect(failures, won is not null && wrong.Length == 0,
+            $"requests for {won ?? "the winning seat"} should be 201/200 replays and the rest 409 idempotency_key_conflict; got {Describe(wrong)}");
+
+        var reuse = await client.ReserveAsync(showId, user, tokens[0], ["Z"], key, KeyPlacement.Header);
+        Expect(failures, reuse is { Status: 409, Code: "idempotency_key_conflict" },
+            $"sequential reuse with new seats should be 409 idempotency_key_conflict; got {reuse.Bucket}");
+
+        var show = await client.GetShowAsync(showId);
+        Expect(failures, show.Reconciles, $"show doesn't reconcile: {show.Available}+{show.Held}+{show.Confirmed} != {show.Total}");
+        Expect(failures, show.Confirmed == 1 && won is not null && show.SeatStatus.GetValueOrDefault(won) == "confirmed",
+            $"exactly the winning seat should be confirmed; confirmed={show.Confirmed}");
+
+        var lines = new List<string>
+        {
+            minted,
+            $"winning seat: {won ?? "none"}   reservation: {ids.FirstOrDefault()}",
+            $"sequential reuse with [Z]: {reuse.Bucket}",
+            $"reconciliation: {show.Available}+{show.Held}+{show.Confirmed} == {show.Total}",
+            $"show {showId}",
+        };
+        return (new ScenarioResult("conflict", $"same key, different request: {options.IdemRequests} × one key -> X | Y", outcomes, failures, stopwatch.Elapsed), lines);
     }
 
     public async Task<(ScenarioResult Result, List<string> Lines)> MixedStormAsync()

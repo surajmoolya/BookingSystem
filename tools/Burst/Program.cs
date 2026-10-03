@@ -57,6 +57,8 @@ foreach (var name in options.Scenarios)
     var (result, lines) = name switch
     {
         "hot" => await scenarios.HotSeatAsync(),
+        "idem" => await scenarios.IdempotentRetriesAsync(),
+        "conflict" => await scenarios.KeyConflictAsync(),
         "mixed" => await scenarios.MixedStormAsync(),
         _ => throw new InvalidOperationException($"Scenario '{name}' is not wired."),
     };

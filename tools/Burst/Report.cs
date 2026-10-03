@@ -79,5 +79,5 @@ public static class Report
     private static Dictionary<string, int> Counts(IEnumerable<Outcome> outcomes) =>
         Stats.Count(outcomes).ToDictionary(kv => Stats.Name(kv.Key), kv => kv.Value);
 
-    private static void Line(string label, string value) => Console.WriteLine($"  {(label + " ").PadRight(22, '.')} {value}");
+    private static void Line(string label, string value) => Console.WriteLine($"  {(label + " ").PadRight(32, '.')} {value}");
 }

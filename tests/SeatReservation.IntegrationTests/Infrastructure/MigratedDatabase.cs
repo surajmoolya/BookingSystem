@@ -23,6 +23,9 @@ public sealed class MigratedDatabase : IAsyncDisposable
     /// <summary>One metrics instance per database, for repositories and runners the tests build by hand.</summary>
     public DbMetrics Metrics { get; } = TestMetrics.NewDb();
 
+    /// <summary>The read executor (retry + classification) over <see cref="Metrics"/>, for hand-built read repositories.</summary>
+    public PgQueryExecutor Reads => new(Metrics, NullLogger<PgQueryExecutor>.Instance);
+
     public static async Task<MigratedDatabase> CreateAsync(PostgresFixture postgres, DatabaseOptions? options = null)
     {
         options ??= new DatabaseOptions { MaxPoolSize = 8, OpsPoolSize = 2 };

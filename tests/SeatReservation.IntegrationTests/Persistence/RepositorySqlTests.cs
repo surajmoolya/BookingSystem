@@ -35,7 +35,7 @@ public class RepositorySqlTests(PostgresFixture postgres, ITestOutputHelper outp
 
         await InsertAsync(db, show, ["A1", "A2"]);
 
-        Assert.Equal(show, await new ShowReadRepository(db.Sources, db.Metrics).GetShowAsync(show.Id, CancellationToken.None));
+        Assert.Equal(show, await new ShowReadRepository(db.Sources, db.Reads).GetShowAsync(show.Id, CancellationToken.None));
     }
 
     [Fact]
@@ -102,7 +102,7 @@ public class RepositorySqlTests(PostgresFixture postgres, ITestOutputHelper outp
     {
         await using var db = await MigratedDatabase.CreateAsync(postgres);
 
-        Assert.Null(await new ShowReadRepository(db.Sources, db.Metrics).GetShowAsync(Guid.NewGuid(), CancellationToken.None));
+        Assert.Null(await new ShowReadRepository(db.Sources, db.Reads).GetShowAsync(Guid.NewGuid(), CancellationToken.None));
     }
 
     [Fact]
@@ -112,7 +112,7 @@ public class RepositorySqlTests(PostgresFixture postgres, ITestOutputHelper outp
         var show = NewShow(4);
         await InsertAsync(db, show, ["B2", "A10", "a1", "A2"]);
 
-        var snapshot = await new ShowReadRepository(db.Sources, db.Metrics).GetSeatSnapshotAsync(show.Id, CancellationToken.None);
+        var snapshot = await new ShowReadRepository(db.Sources, db.Reads).GetSeatSnapshotAsync(show.Id, CancellationToken.None);
 
         Assert.Equal(["B2", "A10", "a1", "A2"], snapshot.Select(s => s.Label));
         Assert.All(snapshot, s => Assert.Equal(SeatStatus.Available, s.Status));
@@ -134,7 +134,7 @@ public class RepositorySqlTests(PostgresFixture postgres, ITestOutputHelper outp
             UPDATE seats SET status = 'held', user_id = 'alice', reservation_id = '{reservation}' WHERE show_id = '{show.Id}' AND label = 'A3';
             """);
 
-        var snapshot = await new ShowReadRepository(db.Sources, db.Metrics).GetSeatSnapshotAsync(show.Id, CancellationToken.None);
+        var snapshot = await new ShowReadRepository(db.Sources, db.Reads).GetSeatSnapshotAsync(show.Id, CancellationToken.None);
 
         Assert.Equal(
             [new SeatState("A1", SeatStatus.Confirmed), new SeatState("A2", SeatStatus.Available), new SeatState("A3", SeatStatus.Held)],
@@ -146,7 +146,7 @@ public class RepositorySqlTests(PostgresFixture postgres, ITestOutputHelper outp
     {
         await using var db = await MigratedDatabase.CreateAsync(postgres);
 
-        Assert.Empty(await new ShowReadRepository(db.Sources, db.Metrics).GetSeatSnapshotAsync(Guid.NewGuid(), CancellationToken.None));
+        Assert.Empty(await new ShowReadRepository(db.Sources, db.Reads).GetSeatSnapshotAsync(Guid.NewGuid(), CancellationToken.None));
     }
 
     [Fact]

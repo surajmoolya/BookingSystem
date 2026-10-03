@@ -32,6 +32,7 @@ public static class DependencyInjection
 
         // Needs an IMetricFactory from the composition root (the host's Prometheus registry, D-097).
         services.TryAddSingleton<DbMetrics>();
+        services.TryAddSingleton<PgQueryExecutor>();
         services.TryAddSingleton<ITransactionRunner, PgTransactionRunner>();
         services.TryAddSingleton<IShowReadRepository, ShowReadRepository>();
         services.TryAddSingleton<IReservationReadRepository, ReservationReadRepository>();

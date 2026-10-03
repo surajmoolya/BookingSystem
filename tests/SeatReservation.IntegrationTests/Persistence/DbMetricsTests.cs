@@ -97,8 +97,8 @@ public class DbMetricsTests(PostgresFixture postgres)
     {
         await using var db = await MigratedDatabase.CreateAsync(postgres);
         var metrics = NewMetrics();
-        var shows = new ShowReadRepository(db.Sources, metrics);
-        var reservations = new ReservationReadRepository(db.Sources, metrics);
+        var shows = new ShowReadRepository(db.Sources, new PgQueryExecutor(metrics, NullLogger<PgQueryExecutor>.Instance));
+        var reservations = new ReservationReadRepository(db.Sources, new PgQueryExecutor(metrics, NullLogger<PgQueryExecutor>.Instance));
         var showId = await db.InsertShowAsync();
 
         await shows.GetShowAsync(showId, CancellationToken.None);

@@ -9,15 +9,15 @@ using static SeatReservation.Infrastructure.Repositories.ReservationMapping;
 namespace SeatReservation.Infrastructure.Repositories;
 
 /// <summary>Autocommit reservation reads on the main pool, outside any transaction (lld §6.3).</summary>
-public sealed class ReservationReadRepository(DataSources dataSources, DbMetrics metrics) : IReservationReadRepository
+public sealed class ReservationReadRepository(DataSources dataSources, PgQueryExecutor reads) : IReservationReadRepository
 {
     private const string OwnersSql = "SELECT label, status, user_id FROM seats WHERE show_id = $1 AND label = ANY($2)";
 
     public Task<Reservation?> FindByKeyAsync(string userId, string idempotencyKey, CancellationToken ct) =>
-        metrics.MeasureAsync(GetReservation, () => QueryByKeyAsync(userId, idempotencyKey, ct));
+        reads.RunAsync(GetReservation, attemptCt => QueryByKeyAsync(userId, idempotencyKey, attemptCt), ct);
 
     public Task<Reservation?> GetByIdAsync(Guid reservationId, CancellationToken ct) =>
-        metrics.MeasureAsync(GetReservation, () => QueryByIdAsync(reservationId, ct));
+        reads.RunAsync(GetReservation, attemptCt => QueryByIdAsync(reservationId, attemptCt), ct);
 
     public Task<FastPathSnapshot> GetFastPathSnapshotAsync(
         string userId,
@@ -25,7 +25,7 @@ public sealed class ReservationReadRepository(DataSources dataSources, DbMetrics
         Guid showId,
         IReadOnlyList<string> labels,
         CancellationToken ct) =>
-        metrics.MeasureAsync(FastPath, () => QueryFastPathAsync(userId, idempotencyKey, showId, labels, ct));
+        reads.RunAsync(FastPath, attemptCt => QueryFastPathAsync(userId, idempotencyKey, showId, labels, attemptCt), ct);
 
     private async Task<Reservation?> QueryByKeyAsync(string userId, string idempotencyKey, CancellationToken ct)
     {

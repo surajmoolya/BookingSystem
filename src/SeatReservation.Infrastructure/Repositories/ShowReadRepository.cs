@@ -9,7 +9,7 @@ using static SeatReservation.Infrastructure.Transactions.DbMetrics.Operations;
 namespace SeatReservation.Infrastructure.Repositories;
 
 /// <summary>Autocommit show reads on the main pool, outside any transaction (lld §5.3).</summary>
-public sealed class ShowReadRepository(DataSources dataSources, DbMetrics metrics) : IShowReadRepository
+public sealed class ShowReadRepository(DataSources dataSources, PgQueryExecutor reads) : IShowReadRepository
 {
     private const string GetShowSql = "SELECT id, name, price_paise, per_user_limit, total_seats FROM shows WHERE id = $1";
 
@@ -17,10 +17,10 @@ public sealed class ShowReadRepository(DataSources dataSources, DbMetrics metric
     private const string SnapshotSql = "SELECT label, status FROM seats WHERE show_id = $1 ORDER BY ordinal";
 
     public Task<ShowInfo?> GetShowAsync(Guid showId, CancellationToken ct) =>
-        metrics.MeasureAsync(GetShow, () => QueryShowAsync(showId, ct));
+        reads.RunAsync(GetShow, attemptCt => QueryShowAsync(showId, attemptCt), ct);
 
     public Task<IReadOnlyList<SeatState>> GetSeatSnapshotAsync(Guid showId, CancellationToken ct) =>
-        metrics.MeasureAsync(GetShow, () => QuerySnapshotAsync(showId, ct));
+        reads.RunAsync(GetShow, attemptCt => QuerySnapshotAsync(showId, attemptCt), ct);
 
     private async Task<ShowInfo?> QueryShowAsync(Guid showId, CancellationToken ct)
     {

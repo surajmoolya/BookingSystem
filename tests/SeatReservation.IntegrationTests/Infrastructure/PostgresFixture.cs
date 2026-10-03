@@ -38,6 +38,9 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     public Task InitializeAsync() => _container.StartAsync();
 
+    /// <summary>Stops the container (for outage tests that own their fixture). Its mapped port is not kept across a restart.</summary>
+    public Task StopAsync() => _container.StopAsync();
+
     public Task DisposeAsync() => _container.DisposeAsync().AsTask();
 }
 

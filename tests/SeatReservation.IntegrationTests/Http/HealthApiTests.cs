@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net;
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
@@ -37,7 +38,17 @@ public sealed class HealthApiTests(PostgresFixture postgres)
         using var response = await client.GetAsync("/health/ready");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("Healthy", await response.Content.ReadAsStringAsync());
+        Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("Healthy", body.RootElement.GetProperty("status").GetString());
+        var checks = body.RootElement.GetProperty("checks");
+        Assert.Equal(["database", "migrations"], checks.EnumerateObject().Select(c => c.Name).Order());
+        foreach (var check in checks.EnumerateObject())
+        {
+            Assert.Equal("Healthy", check.Value.GetProperty("status").GetString());
+            Assert.True(check.Value.GetProperty("duration_ms").GetInt64() >= 0);
+            Assert.False(check.Value.TryGetProperty("description", out _));
+        }
         Assert.Contains("no-store", response.Headers.CacheControl?.ToString() ?? "");
     }
 
@@ -51,7 +62,13 @@ public sealed class HealthApiTests(PostgresFixture postgres)
         using var live = await client.GetAsync("/health/live");
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, ready.StatusCode);
-        Assert.Equal("Unhealthy", await ready.Content.ReadAsStringAsync());
+        var text = await ready.Content.ReadAsStringAsync();
+        using var body = JsonDocument.Parse(text);
+        Assert.Equal("Unhealthy", body.RootElement.GetProperty("status").GetString());
+        var database = body.RootElement.GetProperty("checks").GetProperty("database");
+        Assert.Equal("Unhealthy", database.GetProperty("status").GetString());
+        Assert.StartsWith("database ", database.GetProperty("description").GetString());   // "unreachable (…)" or "did not answer within 2s"
+        Assert.DoesNotContain("127.0.0.1", text);   // no host or connection details in the probe body
         Assert.Equal(HttpStatusCode.OK, live.StatusCode);
     }
 

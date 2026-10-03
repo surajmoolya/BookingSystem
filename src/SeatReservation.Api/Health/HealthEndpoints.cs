@@ -24,10 +24,11 @@ public static class HealthEndpoints
             .AllowAnonymous();
 
         // Readiness: 200 only when every "ready" check is Healthy, otherwise 503. Render routes traffic on this.
-        // T-6.2 replaces the default plain-text writer with the JSON body from lld §5.7.
+        // JSON body per lld §5.7. Neither endpoint carries the "db" rate-limit policy, so probes never queue behind a burst.
         app.MapHealthChecks("/health/ready", new HealthCheckOptions
             {
                 Predicate = registration => registration.Tags.Contains(ReadyTag),
+                ResponseWriter = ReadinessResponseWriter.WriteAsync,
                 ResultStatusCodes =
                 {
                     [HealthStatus.Healthy] = StatusCodes.Status200OK,

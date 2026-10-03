@@ -23,6 +23,8 @@ else if (string.IsNullOrWhiteSpace(builder.Configuration["urls"]))
     builder.WebHost.UseUrls("http://0.0.0.0:8080");
 }
 
+builder.AddStructuredLogging();
+
 builder.Services.AddControllers()
     .AddJsonOptions(o =>
     {
@@ -45,6 +47,7 @@ builder.Services.AddHostedService<ShutdownDrain>();
 
 var app = builder.Build();
 
+app.UseRequestCompletionLogging();
 app.UseExceptionHandler();
 app.UseRouting();
 app.UseRouteTemplateHttpMetrics();

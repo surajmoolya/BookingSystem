@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SeatReservation.Api.Auth;
 using SeatReservation.Api.Mapping;
+using SeatReservation.Api.Observability;
 using SeatReservation.Application.Reservations;
 
 namespace SeatReservation.Api.Controllers;
@@ -26,7 +27,9 @@ public sealed class ReservationsController(
             return OutcomeHttpMapper.ReservationNotFound(this);
         }
 
-        var outcome = await reservations.GetForOwnerAsync(reservationId, User.GetUserId(), HttpContext.RequestAborted);
+        var userId = User.GetUserId();
+        var outcome = await reservations.GetForOwnerAsync(reservationId, userId, HttpContext.RequestAborted);
+        RequestLogContext.GetReservation(this, outcome, reservationId, userId);
         return OutcomeHttpMapper.ToResult(outcome, this);
     }
 
@@ -40,7 +43,9 @@ public sealed class ReservationsController(
         }
 
         // The app-stopping token, not RequestAborted: a client giving up must not cancel the cancel mid-commit (D-042).
-        var outcome = await cancellations.CancelAsync(new CancelReservationCommand(reservationId, User.GetUserId()), lifetime.ApplicationStopping);
+        var userId = User.GetUserId();
+        var outcome = await cancellations.CancelAsync(new CancelReservationCommand(reservationId, userId), lifetime.ApplicationStopping);
+        RequestLogContext.Cancel(this, outcome, reservationId, userId);
         return OutcomeHttpMapper.ToResult(outcome, this);
     }
 }

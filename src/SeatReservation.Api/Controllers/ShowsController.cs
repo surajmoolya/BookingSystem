@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using SeatReservation.Api.Auth;
 using SeatReservation.Api.Contracts.Requests;
 using SeatReservation.Api.Mapping;
+using SeatReservation.Api.Observability;
 using SeatReservation.Application.Reservations;
 using SeatReservation.Application.Shows;
 
@@ -73,6 +74,7 @@ public sealed class ShowsController(ShowService shows, ReservationService reserv
 
         // The app-stopping token, not RequestAborted: a client giving up must not cancel a reservation mid-commit (D-042).
         var outcome = await reservations.ReserveAsync(command, lifetime.ApplicationStopping);
+        RequestLogContext.Reserve(this, outcome, command.UserId, showId);
         return OutcomeHttpMapper.ToResult(outcome, this);
     }
 }

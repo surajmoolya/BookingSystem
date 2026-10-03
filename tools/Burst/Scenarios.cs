@@ -144,6 +144,49 @@ public sealed class Scenarios(ServiceClient client, BurstOptions options)
         return (new ScenarioResult("conflict", $"same key, different request: {options.IdemRequests} × one key -> X | Y", outcomes, failures, stopwatch.Elapsed), lines);
     }
 
+    /// <summary>
+    /// lld §12 #4: one user fires <c>limit-requests</c> single-seat requests for distinct seats at once, first on a show
+    /// with <c>per_user_limit: 4</c>, then on one with <c>per_user_limit: 2</c> (D-085). Exactly the limit wins each time.
+    /// </summary>
+    public async Task<(ScenarioResult Result, List<string> Lines)> PerUserLimitAsync()
+    {
+        var user = $"b{_run}-limit";
+        var (tokens, minted) = await MintAsync([user]);
+        var failures = new List<string>();
+        var lines = new List<string> { minted };
+        var all = new List<Outcome>();
+        var elapsed = TimeSpan.Zero;
+
+        foreach (var limit in new[] { 4, 2 })
+        {
+            var labels = Enumerable.Range(1, options.LimitRequests).Select(i => $"L{i}").ToArray();
+            var showId = await client.CreateShowAsync($"burst-limit{limit}-{_run}", labels, limit);
+
+            var stopwatch = Stopwatch.StartNew();
+            var outcomes = await StartGate.RunAsync(labels.Length, i =>
+                client.ReserveAsync(showId, user, tokens[0], [labels[i]], $"limit{limit}-{_run}-{i}", options.KeyPlacementFor(i)));
+            elapsed += stopwatch.Elapsed;
+            all.AddRange(outcomes);
+
+            GateZero5xx(failures, outcomes);
+            var won = outcomes.Where(o => o.Status == 201).ToArray();
+            Expect(failures, won.Length == limit, $"per_user_limit {limit}: expected exactly {limit}×201, got {won.Length}");
+            var others = outcomes.Where(o => o.Status != 201).ToArray();
+            Expect(failures, others.All(o => o is { Status: 409, Code: "per_user_limit" }),
+                $"per_user_limit {limit}: every other response should be 409 per_user_limit; got {Describe(others.Where(o => o.Code != "per_user_limit"))}");
+
+            var show = await client.GetShowAsync(showId);
+            var confirmed = show.SeatStatus.Where(s => s.Value == "confirmed").Select(s => s.Key).ToHashSet(StringComparer.Ordinal);
+            Expect(failures, show.Reconciles, $"per_user_limit {limit}: show doesn't reconcile: {show.Available}+{show.Held}+{show.Confirmed} != {show.Total}");
+            Expect(failures, confirmed.Count == limit && confirmed.SetEquals(won.SelectMany(o => o.Seats)),
+                $"per_user_limit {limit}: the user should own exactly the {limit} seats in the 201s; confirmed={confirmed.Count}");
+
+            lines.Add($"per_user_limit {limit}: {won.Length}×201, {others.Length}×409 per_user_limit, owns [{string.Join(",", confirmed.Order())}]   show {showId}");
+        }
+
+        return (new ScenarioResult("limit", $"per-user limit: {options.LimitRequests} seats × one user, limit 4 then 2", all.ToArray(), failures, elapsed), lines);
+    }
+
     public async Task<(ScenarioResult Result, List<string> Lines)> MixedStormAsync()
     {
         var random = new Random(Environment.TickCount);

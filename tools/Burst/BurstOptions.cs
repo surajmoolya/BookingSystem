@@ -22,10 +22,10 @@ public sealed record BurstOptions(
     string KeyIn,
     string? JsonPath)
 {
-    public static readonly string[] Implemented = ["hot", "idem", "conflict", "mixed"];
+    public static readonly string[] Implemented = ["hot", "idem", "conflict", "limit", "mixed"];
 
     /// <summary>The rest of lld §12's scenarios arrive with M7.</summary>
-    public static readonly string[] Planned = ["limit", "cancel"];
+    public static readonly string[] Planned = ["cancel"];
 
     /// <summary>Concurrent <c>POST /auth/token</c> calls while minting, before any timed window.</summary>
     public const int MintParallelism = 32;

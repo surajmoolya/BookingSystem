@@ -88,8 +88,12 @@ public sealed class ServiceClient : IDisposable
         }
     }
 
-    /// <summary>Tokens come from <c>POST /auth/token</c> (the signing key is a server secret), minted before the timed window.</summary>
-    public async Task<string[]> MintTokensAsync(IReadOnlyList<string> users, int parallelism = 32)
+    /// <summary>
+    /// Tokens come from <c>POST /auth/token</c> (the signing key is a server secret), minted before the timed window with
+    /// at most <see cref="BurstOptions.MintParallelism"/> calls in flight, so minting never looks like part of the burst.
+    /// A failed mint is retried with backoff; after five attempts the run stops, since a missing token would skew the scenario.
+    /// </summary>
+    public async Task<string[]> MintTokensAsync(IReadOnlyList<string> users, int parallelism = BurstOptions.MintParallelism)
     {
         var tokens = new string[users.Count];
         await Parallel.ForEachAsync(Enumerable.Range(0, users.Count), new ParallelOptions { MaxDegreeOfParallelism = parallelism }, async (i, ct) =>

@@ -11,6 +11,8 @@ public sealed record BurstOptions(
     Uri BaseUrl,
     IReadOnlyList<string> Scenarios,
     int HotUsers,
+    int IdemRequests,
+    int LimitRequests,
     int MixedRequests,
     int MixedUsers,
     int MixedSeats,
@@ -24,6 +26,9 @@ public sealed record BurstOptions(
 
     /// <summary>The rest of lld §12's scenarios arrive with M7.</summary>
     public static readonly string[] Planned = ["idem", "conflict", "limit", "cancel"];
+
+    /// <summary>Concurrent <c>POST /auth/token</c> calls while minting, before any timed window.</summary>
+    public const int MintParallelism = 32;
 
     public TimeSpan Timeout => TimeSpan.FromSeconds(TimeoutSeconds);
 
@@ -96,6 +101,8 @@ public sealed record BurstOptions(
                 baseUrl,
                 scenarios,
                 Int(values, "hot-users", 500),
+                Int(values, "idem-requests", 200),
+                Int(values, "limit-requests", 50),
                 Int(values, "mixed-requests", 20_000),
                 Int(values, "mixed-users", 5_000),
                 Int(values, "mixed-seats", 1_000),
@@ -108,6 +115,12 @@ public sealed record BurstOptions(
         catch (FormatException ex)
         {
             error = ex.Message;
+            return false;
+        }
+
+        if (options.IdemRequests < 2 || options.LimitRequests < 5)
+        {
+            error = "--idem-requests must be at least 2 and --limit-requests at least 5 (more than the per-user limit of 4).";
             return false;
         }
 

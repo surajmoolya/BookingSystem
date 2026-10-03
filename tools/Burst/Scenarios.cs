@@ -18,7 +18,7 @@ public sealed class Scenarios(ServiceClient client, BurstOptions options)
     {
         var showId = await client.CreateShowAsync($"burst-hot-{_run}", Enumerable.Range(1, 10).Select(i => $"A{i}").ToArray(), PerUserLimit);
         var users = Enumerable.Range(0, options.HotUsers).Select(i => $"b{_run}-h{i}").ToArray();
-        var tokens = await client.MintTokensAsync(users);
+        var (tokens, minted) = await MintAsync(users);
 
         var stopwatch = Stopwatch.StartNew();
         var outcomes = await StartGate.RunAsync(users.Length, i =>
@@ -37,7 +37,7 @@ public sealed class Scenarios(ServiceClient client, BurstOptions options)
         Expect(failures, show.Confirmed == 1 && show.SeatStatus.GetValueOrDefault("A1") == "confirmed",
             $"show state should have only A1 confirmed; confirmed={show.Confirmed}, A1={show.SeatStatus.GetValueOrDefault("A1")}");
 
-        var lines = new List<string> { $"reconciliation: {show.Available}+{show.Held}+{show.Confirmed} == {show.Total}", $"show {showId}" };
+        var lines = new List<string> { minted, $"reconciliation: {show.Available}+{show.Held}+{show.Confirmed} == {show.Total}", $"show {showId}" };
         return (new ScenarioResult("hot", $"hot-seat storm: {users.Length} users -> A1", outcomes, failures, stopwatch.Elapsed), lines);
     }
 
@@ -49,7 +49,7 @@ public sealed class Scenarios(ServiceClient client, BurstOptions options)
         var cold = labels[HotSeatCount..];
         var showId = await client.CreateShowAsync($"burst-mixed-{_run}", labels, PerUserLimit);
         var users = Enumerable.Range(0, options.MixedUsers).Select(i => $"b{_run}-m{i}").ToArray();
-        var tokens = await client.MintTokensAsync(users);
+        var (tokens, minted) = await MintAsync(users);
 
         // 90% originals with their own key; 10% are retries of an original (same user, seats and key) racing it.
         var requests = new (int User, string[] Seats, string Key)[options.MixedRequests];
@@ -118,11 +118,19 @@ public sealed class Scenarios(ServiceClient client, BurstOptions options)
 
         var lines = new List<string>
         {
+            minted,
             $"reservations: {reservations.Length}, seats confirmed: {wonSeats.Length} of {labels.Length}, users at the limit: {perUser.Count(u => u.Seats == PerUserLimit)}",
             $"reconciliation: {show.Available}+{show.Held}+{show.Confirmed} == {show.Total}",
             $"show {showId}",
         };
         return (new ScenarioResult("mixed", $"mixed storm: {requests.Length} requests, {users.Length} users, {labels.Length} seats", outcomes, failures, stopwatch.Elapsed), lines);
+    }
+
+    private async Task<(string[] Tokens, string Line)> MintAsync(IReadOnlyList<string> users)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var tokens = await client.MintTokensAsync(users);
+        return (tokens, $"tokens: {tokens.Length} minted in {stopwatch.Elapsed.TotalSeconds:0.0}s ({BurstOptions.MintParallelism} in flight, outside the timed window)");
     }
 
     /// <summary>D-088: any 5xx or transport error fails the run, whatever else happened.</summary>

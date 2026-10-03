@@ -7,21 +7,24 @@ using Burst;
 const string Usage = """
     Usage: burst <BASE_URL> [options]
 
-    Fires concurrent reservation traffic at a running service and checks the results.
+    Fires concurrent reservation traffic at a running service and checks the results (lld §12).
 
     Options:
-      --scenario <list>        hot,mixed (default: all; idem,conflict,limit,cancel arrive in M7)
+      --scenario <list>        comma-separated: hot,idem,conflict,limit,mixed,cancel (default: all built so far)
       --hot-users <n>          distinct users hitting one seat (default: 500)
+      --idem-requests <n>      concurrent same-key requests (default: 200)
+      --limit-requests <n>     one user, distinct seats (default: 50)
       --mixed-requests <n>     total mixed-storm requests (default: 20000)
       --mixed-users <n>        (default: 5000)
-      --mixed-seats <n>        (default: 1000)
-      --max-connections <n>    MaxConnectionsPerServer (default: 1000)
-      --http2                  use HTTP/2 multiplexing
-      --timeout-seconds <n>    per-request timeout (default: 60)
-      --key-in <mode>          header, body or mixed (default: mixed)
+      --mixed-seats <n>        (default: 1000, at least 40)
+      --max-connections <n>    SocketsHttpHandler.MaxConnectionsPerServer (default: 1000)
+      --http2                  HTTP/2 multiplexing, fewer sockets (negotiated over https; plain http stays on 1.1)
+      --timeout-seconds <n>    per request; the zero-5xx gate also requires 0 transport errors at this timeout (default: 60)
+      --key-in <mode>          where the Idempotency-Key goes: header, body or mixed (alternate per request) (default: mixed)
       --json <file>            write a machine-readable report
       -h, --help               show this help
 
+    Tokens are minted up front via POST /auth/token, at most 32 in flight, outside the timed window.
     Exit code: 0 if every scenario passes, 1 otherwise.
     """;
 

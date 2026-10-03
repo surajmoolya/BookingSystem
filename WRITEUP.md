@@ -19,6 +19,7 @@ wrong, and how you'd run it. The [README](README.md) covers usage; this document
 12. [Layering and test strategy](#12-layering-and-test-strategy)
 13. [Capacity on the deployed plan](#13-capacity-on-the-deployed-plan)
 14. [Future improvements](#14-future-improvements)
+15. [AI usage disclosure](#15-ai-usage-disclosure)
 
 ## 1. Preventing double-selling
 
@@ -288,3 +289,34 @@ locked path's queries, can't make up the roughly 5× gap on a tenth of a CPU.
 - **Payments and events:** an outbox table for reservation events, so payment or notification services can consume
   them reliably.
 - **Bigger venues:** partition `seats` by show, and serve `GET /shows/{id}` from a read replica.
+- **Faster large show creation:** the per-row foreign-key check on `seats.show_id` takes about 0.5 s of the
+  ~0.7–0.9 s needed to insert a 10,000-seat show. A migration dropping that key (seats are only ever inserted in the
+  same transaction as their show) would roughly halve it. Harmless at runtime today, but it leaves little margin in
+  the 1 s budget of the large-show test.
+
+## 15. AI usage disclosure
+
+**Tools.** Claude Code (Anthropic's coding agent, in the Claude desktop app), with the Claude Opus 5.5 model for almost
+all of the work and Claude Sonnet 5.5 for a few early data-access tasks. No other AI tools were used.
+
+**What the AI did.**
+- *Planning and design:* drafted the plan, high-level and low-level design, decision log and task list from the
+  assignment text (kept locally, outside the repo). I set the constraints it worked within: .NET 8, a JWT demo login,
+  Render, the controller → logic → repository layering, unit tests for the logic layer only, and the free plan.
+- *Code and tests:* wrote the service, the migrations, the unit and integration tests, the burst tool, the Docker and
+  Render configuration, CI, and these documents, one small task at a time.
+- *Verification:* ran the test suites, the local and remote bursts, and the curl checks behind the README, and
+  recorded the measured numbers.
+- *Review:* re-checked its own changes against the design and the assignment's wording, and flagged open issues and
+  failed gates instead of hiding them (for example the free-plan capacity result in section 13).
+
+**What I verified myself.**
+- The changes, task by task: the AI stopped after each task (or each milestone, where I told it to continue) and
+  committed only when I said so. All commits are under my name without an AI co-author line, by my choice; this
+  section is the disclosure.
+- The deployment: I created the Render Blueprint and database, and captured the Render log excerpt linked from the
+  README.
+- The decisions that were mine to make: the stack and hosting plan, when to push and deploy, and what to defer.
+
+**What I changed by hand.** Nothing beyond review and direction: all code, tests, configuration and documentation
+were written by the AI under my instructions.

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using SeatReservation.Api.Auth;
 using SeatReservation.Api.Errors;
 using SeatReservation.Api.Health;
@@ -5,6 +6,7 @@ using SeatReservation.Api.Json;
 using SeatReservation.Api.Observability;
 using SeatReservation.Api.Options;
 using SeatReservation.Application;
+using SeatReservation.Application.Abstractions;
 using SeatReservation.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -34,6 +36,7 @@ builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails();
 builder.Services.AddMetricsRegistry();
 builder.Services.AddApplication();
+builder.Services.Replace(ServiceDescriptor.Singleton<IReservationMetrics, PrometheusReservationMetrics>());   // over AddApplication's no-op default
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddValidatedOptions(builder.Configuration);
 builder.Services.AddJwtAuth();

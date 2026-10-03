@@ -1,4 +1,7 @@
 using System.Net;
+using Microsoft.Extensions.DependencyInjection;
+using SeatReservation.Api.Observability;
+using SeatReservation.Application.Abstractions;
 using SeatReservation.IntegrationTests.Infrastructure;
 using static SeatReservation.IntegrationTests.Infrastructure.ReserveCalls;
 
@@ -32,4 +35,8 @@ public class MetricsApiTests(ApiFixture api) : IClassFixture<ApiFixture>
     [Fact]
     public async Task Process_and_runtime_collectors_are_exported() =>
         Assert.Contains((await MetricsScrape.FetchAsync(api.Client)).DeclaredNames, n => n.StartsWith("process_", StringComparison.Ordinal));
+
+    [Fact]
+    public void The_logic_layer_records_into_the_prometheus_adapter_not_the_null_default() =>
+        Assert.IsType<PrometheusReservationMetrics>(api.Factory.Services.GetRequiredService<IReservationMetrics>());
 }

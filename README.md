@@ -56,3 +56,15 @@ The 20k-request burst (`./burst.sh https://seatres-api.onrender.com`, lld §12) 
 
 This is a choice to stay on the free plan, not a design limit. The service keeps one instance (the gauges are
 per-process), so it scales up, not out: a Standard instance (1 CPU) is the next step for the zero-5xx gate.
+
+## Log evidence
+
+[Render live log captured during a burst](https://docs.google.com/document/d/1SExnH3vJzOQWY8asZlmzT9hh9cItXMWaGR2h1TSZs00/edit?usp=sharing)
+(2026-10-03, `./burst.sh https://seatres-api.onrender.com --scenario hot,cancel`). The document shows:
+- one JSON `http.request` line per request, with `CorrelationId`, trace id, route-template `Endpoint`, status and `Outcome`;
+- the domain events `reservation.confirmed`, `reservation.cancelled` and `show.created`;
+- the single hot-seat winner and the `409 seat_taken` declines;
+- the cancel/rebook flow (`not_owner` → `cancelled` → rebooked → `already_cancelled`).
+
+Render live logs are visible only to members of the Render workspace, so the evaluator can't open them directly.
+This document stands in for that access.
